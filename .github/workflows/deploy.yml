@@ -54,8 +54,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           command_timeout: 25m
-          script_stop: true
           script: |
+            set -e
             cd /var/www/project2
             git remote set-url origin https://github.com/Nima-Aini/hekmat.git
             git fetch origin main
