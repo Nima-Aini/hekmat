@@ -5,10 +5,9 @@ set -Eeuo pipefail
 # Values can be overridden on the server without editing this file.
 PROJECT_DIR="${PROJECT_DIR:-/var/www/project2}"
 APP_NAME="${APP_NAME:-akma-accounting}"
-PORT="${PORT:-3030}"
+PORT="${PORT:-}"
 BRANCH="${BRANCH:-main}"
 TARGET_SHA="${1:-origin/${BRANCH}}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${PORT}/api/health}"
 BACKUP_DIR="${BACKUP_DIR:-${PROJECT_DIR}/backups}"
 LOCK_FILE="${LOCK_FILE:-/tmp/${APP_NAME}.deploy.lock}"
 PREVIOUS_SHA=""
@@ -89,6 +88,20 @@ command -v npm >/dev/null
 command -v pm2 >/dev/null
 command -v curl >/dev/null
 command -v pg_dump >/dev/null
+
+# Preserve the port used by the currently running PM2 process. This prevents
+# an automatic deployment from drifting away from the existing Nginx target.
+if [ -z "$PORT" ]; then
+  RUNNING_PID="$(pm2 pid "$APP_NAME" 2>/dev/null | tail -n 1 || true)"
+  if [[ "$RUNNING_PID" =~ ^[0-9]+$ ]] && [ "$RUNNING_PID" -gt 0 ] && [ -r "/proc/${RUNNING_PID}/environ" ]; then
+    PORT="$(tr '\0' '\n' < "/proc/${RUNNING_PID}/environ" | sed -n 's/^PORT=//p' | tail -n 1)"
+  fi
+fi
+
+# project2 has historically used 3020; use it only when no running value exists.
+PORT="${PORT:-3020}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${PORT}/api/health}"
+log "Selected application port: $PORT"
 
 mkdir -p "$(dirname "$LOCK_FILE")"
 exec 9>"$LOCK_FILE"

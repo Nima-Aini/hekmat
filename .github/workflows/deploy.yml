@@ -63,5 +63,4 @@ jobs:
             chmod 700 /tmp/hekmat-deploy.sh
             PROJECT_DIR=/var/www/project2 \
             APP_NAME=akma-accounting \
-            PORT=3030 \
             bash /tmp/hekmat-deploy.sh "${{ github.sha }}"
