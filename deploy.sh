@@ -2,181 +2,155 @@
 
 set -Eeuo pipefail
 
-PROJECT_DIR="/var/www/project2"
-APP_NAME="akma-accounting"
-PORT="3030"
-
-LOCAL_URL="http://127.0.0.1:${PORT}"
-HEALTH_URL="${LOCAL_URL}/api/health"
-PUBLIC_URL="https://hekmat.akmaofficial.ir/"
-
-BACKUP_DIR="${PROJECT_DIR}/backups"
-TIMESTAMP="$(date '+%Y-%m-%d_%H-%M-%S')"
-BACKUP_FILE="${BACKUP_DIR}/akma_db_${TIMESTAMP}.sql"
+# Values can be overridden on the server without editing this file.
+PROJECT_DIR="${PROJECT_DIR:-/var/www/project2}"
+APP_NAME="${APP_NAME:-akma-accounting}"
+PORT="${PORT:-3030}"
+BRANCH="${BRANCH:-main}"
+TARGET_SHA="${1:-origin/${BRANCH}}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${PORT}/api/health}"
+BACKUP_DIR="${BACKUP_DIR:-${PROJECT_DIR}/backups}"
+LOCK_FILE="${LOCK_FILE:-/tmp/${APP_NAME}.deploy.lock}"
+PREVIOUS_SHA=""
+BACKUP_FILE=""
+ROLLING_BACK=0
 
 log() {
-    echo
-    echo "=================================================="
-    echo "[DEPLOY] $1"
-    echo "=================================================="
+  printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
 }
 
-fail() {
-    echo
-    echo "❌ [DEPLOY] DEPLOYMENT FAILED"
-    echo "مرحله خطادار را بررسی کن."
-    exit 1
+start_application() {
+  mkdir -p .next/standalone/.next
+
+  if [ -d public ]; then
+    rm -rf .next/standalone/public
+    cp -a public .next/standalone/public
+  fi
+
+  rm -rf .next/standalone/.next/static
+  cp -a .next/static .next/standalone/.next/static
+  cp .env .next/standalone/.env
+
+  if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
+    PORT="$PORT" HOSTNAME="0.0.0.0" NODE_ENV="production" \
+      pm2 reload "$APP_NAME" --update-env
+  else
+    PORT="$PORT" HOSTNAME="0.0.0.0" NODE_ENV="production" \
+      pm2 start .next/standalone/server.js --name "$APP_NAME"
+  fi
 }
 
-trap fail ERR
+wait_until_healthy() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl -fsS --max-time 4 "$HEALTH_URL" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+rollback() {
+  local exit_code=$?
+
+  if [ "$ROLLING_BACK" -eq 1 ]; then
+    exit "$exit_code"
+  fi
+  ROLLING_BACK=1
+  trap - ERR
+
+  log "Deployment failed; starting application rollback"
+  if [ -n "$PREVIOUS_SHA" ]; then
+    cd "$PROJECT_DIR"
+    git reset --hard "$PREVIOUS_SHA"
+    npm ci --no-audit --no-fund
+    npm run build
+    start_application
+    if wait_until_healthy; then
+      pm2 save
+      log "Application restored to $PREVIOUS_SHA"
+    else
+      log "Rollback failed. Check: pm2 logs $APP_NAME --lines 100"
+    fi
+  fi
+
+  if [ -n "$BACKUP_FILE" ]; then
+    log "Database backup retained at $BACKUP_FILE"
+    log "Database restoration is intentionally manual to avoid overwriting newer data."
+  fi
+  exit "$exit_code"
+}
+
+trap rollback ERR
+
+command -v git >/dev/null
+command -v npm >/dev/null
+command -v pm2 >/dev/null
+command -v curl >/dev/null
+command -v pg_dump >/dev/null
+
+mkdir -p "$(dirname "$LOCK_FILE")"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "Another deployment is already running."
+  exit 1
+fi
 
 cd "$PROJECT_DIR"
 
-# --------------------------------------------------
-# 1. Git
-# --------------------------------------------------
-
-log "1/10 - Checking Git status"
-
-git status --short
-
-log "2/10 - Pulling latest code"
-
-git pull origin main
-
-# --------------------------------------------------
-# 2. Dependencies
-# --------------------------------------------------
-
-log "3/10 - Installing dependencies"
-
-npm install
-
-# --------------------------------------------------
-# 3. Build
-# --------------------------------------------------
-
-log "4/10 - Building production application"
-
-npm run build
-
-# --------------------------------------------------
-# 4. Environment
-# --------------------------------------------------
-
-log "5/10 - Checking environment"
-
-if [ ! -f ".env" ]; then
-    echo "❌ .env file not found."
-    exit 1
+if [ ! -f .env ]; then
+  echo ".env file not found in $PROJECT_DIR"
+  exit 1
 fi
 
 if ! grep -q '^DATABASE_URL=' .env; then
-    echo "❌ DATABASE_URL is missing from .env"
-    exit 1
+  echo "DATABASE_URL is missing from .env"
+  exit 1
 fi
 
-# --------------------------------------------------
-# 5. Database backup
-# --------------------------------------------------
+# Refuse to erase manual tracked-file edits made directly on the server.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "Tracked files have local changes. Commit or remove them before deployment."
+  git status --short
+  exit 1
+fi
 
-log "6/10 - Backing up PostgreSQL database"
+PREVIOUS_SHA="$(git rev-parse HEAD)"
 
+log "Creating PostgreSQL backup before code or schema changes"
 mkdir -p "$BACKUP_DIR"
-
+BACKUP_FILE="${BACKUP_DIR}/akma_db_$(date '+%Y-%m-%d_%H-%M-%S').dump"
 set -a
+# shellcheck disable=SC1091
 source .env
 set +a
+pg_dump --format=custom --no-owner --no-acl "$DATABASE_URL" > "$BACKUP_FILE"
+test -s "$BACKUP_FILE"
 
-pg_dump "$DATABASE_URL" > "$BACKUP_FILE"
-
-echo "✅ Database backup:"
-echo "$BACKUP_FILE"
-
-# --------------------------------------------------
-# 6. Standalone files
-# --------------------------------------------------
-
-log "7/10 - Preparing standalone deployment"
-
-if [ -d "public" ]; then
-    rm -rf ".next/standalone/public"
-    cp -r "public" ".next/standalone/public"
+log "Fetching requested revision"
+git fetch --prune origin "$BRANCH"
+if ! git cat-file -e "${TARGET_SHA}^{commit}" 2>/dev/null; then
+  echo "Requested commit does not exist: $TARGET_SHA"
+  exit 1
 fi
+git reset --hard "$TARGET_SHA"
 
-rm -rf ".next/standalone/.next/static"
-cp -r ".next/static" ".next/standalone/.next/static"
+log "Installing dependencies and building production frontend/server"
+npm ci --no-audit --no-fund
+npm run build
 
-# Keep server environment
-cp ".env" ".next/standalone/.env"
+log "Reloading PM2 application on port $PORT"
+start_application
 
-# --------------------------------------------------
-# 7. Stop old PM2 process
-# --------------------------------------------------
-
-log "8/10 - Updating PM2 application"
-
-pm2 delete "$APP_NAME" 2>/dev/null || true
-
-PORT="$PORT" \
-HOSTNAME="0.0.0.0" \
-NODE_ENV="production" \
-pm2 start ".next/standalone/server.js" \
-    --name "$APP_NAME"
-
+log "Checking application and database health"
+wait_until_healthy
 pm2 save
 
-# --------------------------------------------------
-# 8. Wait for application
-# --------------------------------------------------
+# Keep backups for 14 days. This runs only after a successful deployment.
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'akma_db_*.dump' -mtime +14 -delete
 
-log "9/10 - Waiting for application"
-
-READY=0
-
-for i in {1..20}; do
-    if curl -fsS --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
-        READY=1
-        break
-    fi
-
-    sleep 1
-done
-
-if [ "$READY" -ne 1 ]; then
-    echo "❌ Application did not become healthy."
-    echo
-    pm2 status "$APP_NAME"
-    echo
-    pm2 logs "$APP_NAME" --lines 50 --nostream
-    exit 1
-fi
-
-# --------------------------------------------------
-# 9. Health checks
-# --------------------------------------------------
-
-log "10/10 - Health checks"
-
-echo
-echo "Local health:"
-curl -fsS --max-time 10 "$HEALTH_URL"
-
-echo
-echo
-echo "Local homepage:"
-curl -fsSI --max-time 10 "$LOCAL_URL/"
-
-echo
-echo
-echo "Public homepage:"
-curl -fsSI --max-time 15 "$PUBLIC_URL"
-
-echo
-echo
-echo "✅ DEPLOYMENT SUCCESSFUL"
-echo
-echo "Application : $APP_NAME"
-echo "Port        : $PORT"
-echo "Database    : connected"
-echo "Backup      : $BACKUP_FILE"
+trap - ERR
+log "Deployment successful: $(git rev-parse HEAD)"
+log "Health check passed: $HEALTH_URL"
+log "Database backup: $BACKUP_FILE"

@@ -14,6 +14,8 @@ export async function register() {
       console.log("✅ Database ready.");
     } catch (err) {
       console.error("❌ Database init failed:", err);
+      // Fail startup so deployment health checks can trigger an app rollback.
+      throw err;
     }
   }
 }

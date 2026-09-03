@@ -1,0 +1,67 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: hekmat-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run critical tests
+        run: npm test
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build production application
+        run: npm run build
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Deploy exact commit over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 25m
+          script_stop: true
+          script: |
+            cd /var/www/project2
+            git remote set-url origin https://github.com/Nima-Aini/hekmat.git
+            git fetch origin main
+            git show origin/main:deploy.sh > /tmp/hekmat-deploy.sh
+            chmod 700 /tmp/hekmat-deploy.sh
+            PROJECT_DIR=/var/www/project2 \
+            APP_NAME=akma-accounting \
+            PORT=3030 \
+            bash /tmp/hekmat-deploy.sh "${{ github.sha }}"
