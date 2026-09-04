@@ -51,7 +51,9 @@ wait_until_healthy() {
 }
 
 rollback() {
-  local exit_code=$?
+  local exit_code="$1"
+  local line_number="$2"
+  local failed_command="$3"
 
   if [ "$ROLLING_BACK" -eq 1 ]; then
     exit "$exit_code"
@@ -59,7 +61,8 @@ rollback() {
   ROLLING_BACK=1
   trap - ERR
 
-  log "Deployment failed; starting application rollback"
+  log "Deployment failed at line $line_number: $failed_command (exit $exit_code)"
+  log "Starting application rollback"
   if [ -n "$PREVIOUS_SHA" ]; then
     cd "$PROJECT_DIR"
     git reset --hard "$PREVIOUS_SHA"
@@ -81,13 +84,22 @@ rollback() {
   exit "$exit_code"
 }
 
-trap rollback ERR
+on_error() {
+  local exit_code="$1"
+  local line_number="$2"
+  local failed_command="$3"
+  trap - ERR
+  rollback "$exit_code" "$line_number" "$failed_command"
+}
 
-command -v git >/dev/null
-command -v npm >/dev/null
-command -v pm2 >/dev/null
-command -v curl >/dev/null
-command -v pg_dump >/dev/null
+trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
+for required_command in git npm pm2 curl pg_dump flock; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "Required server command is missing: $required_command"
+    exit 127
+  fi
+done
 
 # Preserve the port used by the currently running PM2 process. This prevents
 # an automatic deployment from drifting away from the existing Nginx target.
