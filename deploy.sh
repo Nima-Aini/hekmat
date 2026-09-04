@@ -39,6 +39,17 @@ start_application() {
   fi
 }
 
+install_build_dependencies() {
+  # A Next.js build needs devDependencies (Tailwind/PostCSS/TypeScript), even
+  # when the server's .env has NODE_ENV=production.
+  if [ -f package-lock.json ]; then
+    npm ci --include=dev --no-audit --no-fund
+  else
+    # Old revisions predate package-lock.json; keep rollback functional.
+    npm install --include=dev --no-audit --no-fund
+  fi
+}
+
 wait_until_healthy() {
   local attempt
   for attempt in $(seq 1 30); do
@@ -66,7 +77,7 @@ rollback() {
   if [ -n "$PREVIOUS_SHA" ]; then
     cd "$PROJECT_DIR"
     git reset --hard "$PREVIOUS_SHA"
-    npm ci --no-audit --no-fund
+    install_build_dependencies
     npm run build
     start_application
     if wait_until_healthy; then
@@ -162,7 +173,7 @@ fi
 git reset --hard "$TARGET_SHA"
 
 log "Installing dependencies and building production frontend/server"
-npm ci --no-audit --no-fund
+install_build_dependencies
 npm run build
 
 log "Reloading PM2 application on port $PORT"
