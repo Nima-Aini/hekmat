@@ -201,19 +201,22 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ selectedProjec
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="relative overflow-hidden rounded-2xl border border-purple-500/30 bg-gradient-to-l from-purple-950/70 via-violet-950/45 to-slate-900/60 p-4 shadow-xl shadow-purple-950/20 sm:flex sm:items-center sm:justify-between">
+        <div aria-hidden="true" className="pointer-events-none absolute -left-12 -top-16 h-36 w-36 rounded-full bg-purple-500/15 blur-3xl motion-safe:animate-pulse" />
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <Bot className="h-6 w-6 text-purple-400" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-purple-400/30 bg-purple-500/15 shadow-lg shadow-purple-500/20">
+              <Bot className="h-6 w-6 text-purple-300" />
+            </span>
             مرکز هوش مصنوعی حکمت آکما (Gemini AI Core)
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="mr-12 text-xs text-purple-100/70 mt-1">
             دستیار هوشمند با قابلیت چت زنده، تحلیل داده‌ها و تغییر مستقیم اطلاعات و نرخ‌ها در سیستم
           </p>
         </div>
 
         {/* Mode Switcher */}
-        <div className="flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 p-1">
+        <div className="relative mt-4 flex items-center gap-1.5 rounded-xl border border-purple-500/25 bg-slate-950/70 p-1 sm:mt-0">
           <button
             onClick={() => setActiveMode("chat")}
             className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${

@@ -260,22 +260,67 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
+              const isAiAdvisor = item.id === "ai";
               return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setSidebarOpen(false);
-                  }}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all ${
-                    isActive
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
-                      : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                  }`}
-                >
-                  <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-slate-400"}`} />
-                  <span>{item.label}</span>
-                </button>
+                <div key={item.id} className={`relative isolate rounded-xl ${isAiAdvisor ? "my-2" : ""}`}>
+                  {isAiAdvisor && (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute -inset-1 -z-10 rounded-2xl bg-purple-500/25 blur-md motion-safe:animate-pulse"
+                      />
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 100 40"
+                        preserveAspectRatio="none"
+                        className="pointer-events-none absolute -inset-[3px] z-10 h-[calc(100%+6px)] w-[calc(100%+6px)] overflow-visible motion-reduce:hidden"
+                      >
+                        <defs>
+                          <linearGradient id="ai-advisor-ring" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stopColor="#c084fc" />
+                            <stop offset="50%" stopColor="#7c3aed" />
+                            <stop offset="100%" stopColor="#e879f9" />
+                          </linearGradient>
+                        </defs>
+                        <rect
+                          x="1"
+                          y="1"
+                          width="98"
+                          height="38"
+                          rx="12"
+                          fill="none"
+                          stroke="url(#ai-advisor-ring)"
+                          strokeWidth="2"
+                          vectorEffect="non-scaling-stroke"
+                          strokeLinecap="round"
+                          pathLength="100"
+                          strokeDasharray="24 76"
+                        >
+                          <animate attributeName="stroke-dashoffset" from="0" to="-100" dur="2.8s" repeatCount="indefinite" />
+                        </rect>
+                      </svg>
+                    </>
+                  )}
+                  <button
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setSidebarOpen(false);
+                    }}
+                    className={`relative flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all ${
+                      isAiAdvisor
+                        ? isActive
+                          ? "bg-gradient-to-l from-purple-600 to-violet-700 text-white shadow-lg shadow-purple-600/40"
+                          : "border border-purple-500/35 bg-gradient-to-l from-purple-950/90 to-violet-950/80 text-purple-100 shadow-lg shadow-purple-950/30 hover:from-purple-800 hover:to-violet-900"
+                        : isActive
+                          ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
+                          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                    }`}
+                  >
+                    <Icon className={`h-4 w-4 ${isAiAdvisor ? "text-purple-200" : isActive ? "text-white" : "text-slate-400"}`} />
+                    <span>{item.label}</span>
+                    {isAiAdvisor && <Sparkles className="mr-auto h-3.5 w-3.5 text-fuchsia-300 motion-safe:animate-pulse" />}
+                  </button>
+                </div>
               );
             })}
           </nav>
