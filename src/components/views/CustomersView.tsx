@@ -32,6 +32,8 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [customerPage, setCustomerPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
   const [neshanApiKey, setNeshanApiKey] = useState("");
 
   // Modals
@@ -71,12 +73,12 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
     setLoading(true);
     try {
       const [custRes, empRes, settRes] = await Promise.all([
-        fetch(`/api/customers${selectedProjectId ? `?projectId=${selectedProjectId}` : ""}`).then((r) => r.json()),
+        fetch(`/api/customers?${new URLSearchParams({ page: String(customerPage), pageSize: "20", ...(selectedProjectId ? { projectId: selectedProjectId } : {}), ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}) })}`).then((r) => r.json()),
         fetch("/api/employees").then((r) => r.json()),
         fetch("/api/settings").then((r) => r.json()),
       ]);
 
-      if (custRes.success) setCustomers(custRes.customers || []);
+      if (custRes.success) { setCustomers(custRes.customers || []); setPagination(custRes.pagination || { page: 1, pageSize: 20, total: 0, totalPages: 0 }); }
       if (empRes.success) setEmployees(empRes.employees || []);
       if (settRes?.success && settRes.settings) setNeshanApiKey(settRes.settings.neshanApiKey || "");
     } catch (err) {
@@ -87,8 +89,9 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
   };
 
   useEffect(() => {
-    fetchData();
-  }, [selectedProjectId]);
+    const timer = window.setTimeout(fetchData, 250);
+    return () => window.clearTimeout(timer);
+  }, [selectedProjectId, customerPage, searchTerm]);
 
   useEffect(() => {
     const handleNav = (ev: any) => {
@@ -244,7 +247,7 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
             type="text"
             placeholder="جستجوی نام شخص، نام فروشگاه، شماره همراه، یا کد مشتری..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => { setSearchTerm(e.target.value); setCustomerPage(1); }}
             className="w-full rounded-2xl border border-slate-800 bg-slate-900/80 px-10 py-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-500"
           />
         </div>
@@ -352,6 +355,14 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-center gap-3 text-xs text-slate-300">
+          <button type="button" disabled={customerPage <= 1} onClick={() => setCustomerPage((p) => Math.max(1, p - 1))} className="rounded-xl border border-slate-700 px-4 py-2 disabled:opacity-40">صفحه قبل</button>
+          <span>صفحه {pagination.page} از {pagination.totalPages} — {pagination.total} مشتری</span>
+          <button type="button" disabled={customerPage >= pagination.totalPages} onClick={() => setCustomerPage((p) => Math.min(pagination.totalPages, p + 1))} className="rounded-xl border border-slate-700 px-4 py-2 disabled:opacity-40">صفحه بعد</button>
         </div>
       )}
 

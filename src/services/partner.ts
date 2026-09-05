@@ -38,19 +38,24 @@ export async function getEmployeeDashboard(employeeId: string, period = "month")
 }
 
 export async function assignCustomer(customerId: string, employeeId: string | null, projectId: string | null, reason = "manual_assignment", assignedBy = "system") {
-  const [customer] = await db.select().from(customers).where(eq(customers.id, customerId)).limit(1);
-  if (!customer) throw new Error("مشتری پیدا نشد");
-  await db.transaction(async (tx: any) => {
-    if (customer.assignedEmployeeId !== employeeId) {
+  const result = await db.transaction(async (tx: any) => {
+    const [customer] = await tx.select().from(customers).where(eq(customers.id, customerId)).for("update").limit(1);
+    if (!customer) throw new Error("مشتری پیدا نشد");
+    const active = await tx.select().from(customerAssignments).where(and(eq(customerAssignments.customerId, customerId), eq(customerAssignments.status, "active"))).orderBy(desc(customerAssignments.assignedAt));
+    const correctActive = active.length === 1 && active[0].employeeId === employeeId && (!projectId || active[0].projectId === projectId);
+    if (!correctActive) {
       await tx.update(customerAssignments).set({ endedAt: new Date(), status: "ended" }).where(and(eq(customerAssignments.customerId, customerId), eq(customerAssignments.status, "active")));
-      await tx.update(customers).set({ assignedEmployeeId: employeeId, updatedAt: new Date() }).where(eq(customers.id, customerId));
       await tx.insert(customerAssignments).values({ customerId, employeeId, projectId, assignmentReason: reason, assignedBy, status: "active" });
-      if (projectId) {
-        await tx.insert(customerProjectMemberships).values({ customerId, projectId, assignedAt: new Date() }).onConflictDoNothing();
-      }
     }
+    if (customer.assignedEmployeeId !== employeeId) {
+      await tx.update(customers).set({ assignedEmployeeId: employeeId, updatedAt: new Date() }).where(eq(customers.id, customerId));
+    }
+    if (projectId) {
+      await tx.insert(customerProjectMemberships).values({ customerId, projectId, assignedAt: new Date() }).onConflictDoNothing();
+    }
+    return { beforeEmployeeId: customer.assignedEmployeeId, changed: !correctActive || customer.assignedEmployeeId !== employeeId };
   });
-  await logAuditEvent("TRANSFER", "customer", customerId, { before: { employeeId: customer.assignedEmployeeId }, after: { employeeId }, projectId, reason });
+  if (result.changed) await logAuditEvent("TRANSFER", "customer", customerId, { before: { employeeId: result.beforeEmployeeId }, after: { employeeId }, projectId, reason });
 }
 
 export async function transferCustomers(customerIds: string[], toEmployeeId: string | null, projectId: string | null, reason: string, assignedBy = "system") {

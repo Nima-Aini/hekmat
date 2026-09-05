@@ -103,22 +103,22 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         longitude: body.longitude !== undefined ? body.longitude.toString() : owned.longitude,
         creditLimit: body.creditLimit !== undefined ? Number(body.creditLimit).toString() : (body.credit_limit !== undefined ? Number(body.credit_limit).toString() : owned.creditLimit),
         paymentTermsDays: body.paymentTermsDays !== undefined ? Number(body.paymentTermsDays) : (body.settlementTermDays !== undefined ? Number(body.settlementTermDays) : owned.paymentTermsDays),
-        assignedEmployeeId: nextAssignedEmployeeId,
+        assignedEmployeeId: owned.assignedEmployeeId,
         notes: body.notes !== undefined ? body.notes : owned.notes,
         updatedAt: new Date(),
       })
       .where(eq(customers.id, id))
       .returning();
 
-    if (nextAssignedEmployeeId && nextAssignedEmployeeId !== owned.assignedEmployeeId) {
+    if (body.assignedEmployeeId !== undefined || body.projectId) {
       const { assignCustomer } = await import("@/services/partner");
-      await assignCustomer(id, nextAssignedEmployeeId, null, "manager_reassigned", context?.employeeId || nextAssignedEmployeeId);
+      await assignCustomer(id, nextAssignedEmployeeId, body.projectId || null, "manager_reassigned", context?.employeeId || nextAssignedEmployeeId || "system");
     }
 
     await recalculateCustomerHealth(id);
     await logAuditEvent("UPDATE", "customer", id, { name: updated.name, creditLimit: updated.creditLimit, assignedEmployeeId: nextAssignedEmployeeId });
 
-    return NextResponse.json({ success: true, customer: updated });
+    return NextResponse.json({ success: true, customer: { ...updated, assignedEmployeeId: nextAssignedEmployeeId } });
   } catch (error: any) {
     return apiError(error);
   }

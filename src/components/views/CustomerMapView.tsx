@@ -16,7 +16,7 @@ export const CustomerMapView: React.FC = () => {
     setLoading(true);
     try {
       const [custRes, settRes] = await Promise.all([
-        fetch("/api/customers").then((x) => x.json()),
+        fetch("/api/customers?pageSize=100").then((x) => x.json()),
         fetch("/api/settings").then((x) => x.json()),
       ]);
       if (custRes.success) setCustomers(custRes.customers || []);
