@@ -326,7 +326,9 @@ export const ProjectManagementView: React.FC = () => {
       {/* Project Details Modal / Workspace */}
       {selected && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 md:p-6 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 md:p-6 overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setSelected(null);
           }}
@@ -442,7 +444,7 @@ export const ProjectManagementView: React.FC = () => {
 
             {tab === "customers" && (
               <div className="space-y-3">
-                <div className="overflow-auto rounded-2xl border border-slate-800">
+                <div className="responsive-table overflow-auto rounded-2xl border border-slate-800">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-slate-400 bg-slate-900 border-b border-slate-800">
@@ -589,7 +591,9 @@ export const ProjectManagementView: React.FC = () => {
       {/* Create / Edit Project Modal */}
       {show && (
         <div
-          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShow(false);
           }}

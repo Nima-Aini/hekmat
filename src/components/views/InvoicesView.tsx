@@ -721,6 +721,43 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     return matchQuery && matchStatus && matchPayment;
   });
 
+  const paymentStatusLabel = (invoice: any) => {
+    if (invoice.status === "cancelled" || invoice.status === "reversed") return "ابطال شده";
+    if (invoice.paymentStatus === "paid") return "تسویه کامل";
+    if (invoice.paymentStatus === "partial") return "تسویه ناقص";
+    return "تسویه نشده";
+  };
+
+  const paymentStatusClass = (invoice: any) => {
+    if (invoice.status === "cancelled" || invoice.status === "reversed" || invoice.paymentStatus === "unpaid") {
+      return "border-rose-500/30 bg-rose-950/60 text-rose-300";
+    }
+    if (invoice.paymentStatus === "paid") return "border-emerald-500/30 bg-emerald-950/60 text-emerald-300";
+    return "border-amber-500/30 bg-amber-950/60 text-amber-300";
+  };
+
+  const renderInvoiceActions = (inv: any, mobile = false) => (
+    <div className={`flex flex-wrap items-center gap-1.5 ${mobile ? "justify-start" : "justify-center"}`}>
+      <button onClick={() => openViewInvoice(inv)} title="مشاهده و چاپ رسمی فاکتور" aria-label="مشاهده و چاپ فاکتور" className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-slate-400 transition hover:border-purple-500 hover:text-white">
+        <Printer className="h-4 w-4" />
+      </button>
+      <button onClick={() => openEditFullInvoice(inv)} title="ویرایش کامل فاکتور و اقلام" aria-label="ویرایش کامل فاکتور" className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-cyan-400 transition hover:border-cyan-500 hover:text-cyan-300">
+        <Edit3 className="h-4 w-4" />
+      </button>
+      <button onClick={() => openEditInvoice(inv)} title="ثبت دریافتی و تسویه حساب" aria-label="ثبت دریافتی و تسویه" className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-emerald-400 transition hover:border-emerald-500 hover:text-emerald-300">
+        <CreditCard className="h-4 w-4" />
+      </button>
+      {inv.status !== "cancelled" && inv.status !== "reversed" && (
+        <button onClick={() => { setReversingInvoice(inv); setReversalReason(""); }} title="ابطال فاکتور و بازگردانی انبار" aria-label="ابطال فاکتور" className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-amber-400 transition hover:border-amber-500 hover:text-amber-300">
+          <RotateCcw className="h-4 w-4" />
+        </button>
+      )}
+      <button onClick={() => setDeletingInvoice(inv)} title="حذف فاکتور و بازگردانی انبار" aria-label="حذف فاکتور" className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-rose-500 transition hover:border-rose-600 hover:text-rose-400">
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
   return (
     <div className="space-y-6" id="invoices-view-container">
       {/* Header */}
@@ -735,17 +772,17 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
             onClick={fetchData}
-            className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-2.5 text-xs font-semibold text-slate-300 hover:text-white"
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/80 px-3 py-2.5 text-xs font-semibold text-slate-300 hover:text-white sm:flex-none sm:px-4"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin text-purple-400" : ""}`} />
             بروزرسانی
           </button>
           <button
             onClick={openAddModal}
-            className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-purple-600/30 hover:opacity-95"
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-2.5 text-xs font-bold text-white shadow-lg shadow-purple-600/30 hover:opacity-95 sm:flex-none sm:px-5"
           >
             <Plus className="h-4 w-4" />
             صدور فاکتور جدید
@@ -795,7 +832,64 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
 
       {/* Invoices List */}
       <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/60 shadow-xl">
-        <div className="overflow-x-auto">
+        <div className="mobile-card-list gap-3 p-3" aria-label="فهرست فاکتورها">
+          {loading ? (
+            <div className="py-10 text-center text-sm text-slate-500">
+              <RefreshCw className="mx-auto mb-2 h-6 w-6 animate-spin text-purple-500" />
+              در حال بارگذاری فاکتورها...
+            </div>
+          ) : filteredInvoices.length === 0 ? (
+            <div className="py-10 text-center text-sm text-slate-500">هیچ فاکتوری با شرایط انتخابی یافت نشد.</div>
+          ) : filteredInvoices.map((inv) => (
+            <article key={inv.id} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-950/70 p-4 shadow-lg">
+              <div className="flex min-w-0 items-start justify-between gap-3 border-b border-slate-800 pb-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-bold text-white">
+                    <FileText className="h-4 w-4 shrink-0 text-purple-400" />
+                    <span className="truncate font-mono">{inv.invoiceNumber}</span>
+                  </div>
+                  <p className="mt-1 truncate text-xs font-semibold text-slate-200">{inv.customerName || "—"}</p>
+                  {inv.customerStore && <p className="truncate text-[11px] text-slate-500">{inv.customerStore}</p>}
+                </div>
+                <span className={`shrink-0 rounded-xl border px-2 py-1 text-[10px] ${paymentStatusClass(inv)}`}>
+                  {paymentStatusLabel(inv)}
+                </span>
+              </div>
+
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-3 py-3 text-xs">
+                <div className="min-w-0">
+                  <dt className="text-[10px] text-slate-500">مبلغ کل</dt>
+                  <dd className="mt-0.5 break-words font-mono text-sm font-bold text-white">{formatMoney(inv.grandTotal)}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[10px] text-slate-500">تسویه / مانده</dt>
+                  <dd className="mt-0.5 font-mono text-emerald-400">{formatMoney(inv.paidAmount)}</dd>
+                  {Number(inv.balanceDue) > 0 && <dd className="break-words font-mono text-[11px] text-rose-400">مانده: {formatMoney(inv.balanceDue)}</dd>}
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[10px] text-slate-500">ویزیتور / مسئول فروش</dt>
+                  <dd className="mt-0.5 truncate text-slate-300">{inv.employeeName && inv.employeeName !== "-" ? inv.employeeName : "مستقیم / دفتر"}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[10px] text-slate-500">پروژه</dt>
+                  <dd className="mt-0.5 truncate text-slate-300">{inv.projectName || "عمومی"}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-500">تاریخ صدور</dt>
+                  <dd className="mt-0.5 text-slate-300">{toJalaliDate(inv.invoiceDate)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-500">وضعیت سند</dt>
+                  <dd className="mt-0.5 text-slate-300">{inv.status === "cancelled" || inv.status === "reversed" ? "باطل" : "معتبر"}</dd>
+                </div>
+              </dl>
+
+              <div className="border-t border-slate-800 pt-3">{renderInvoiceActions(inv, true)}</div>
+            </article>
+          ))}
+        </div>
+
+        <div className="desktop-table-only responsive-table overflow-x-auto">
           <table className="w-full text-right text-xs text-slate-300">
             <thead className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-semibold">
               <tr>
@@ -883,48 +977,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          onClick={() => openViewInvoice(inv)}
-                          title="مشاهده و چاپ رسمی فاکتور"
-                          className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-slate-400 hover:text-white hover:border-purple-500 transition"
-                        >
-                          <Printer className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => openEditFullInvoice(inv)}
-                          title="ویرایش کامل فاکتور و اقلام"
-                          className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-cyan-400 hover:text-cyan-300 hover:border-cyan-500 transition"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => openEditInvoice(inv)}
-                          title="ثبت دریافتی و تسویه حساب"
-                          className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-emerald-400 hover:text-emerald-300 hover:border-emerald-500 transition"
-                        >
-                          <CreditCard className="h-4 w-4" />
-                        </button>
-                        {inv.status !== "cancelled" && inv.status !== "reversed" && (
-                          <button
-                            onClick={() => {
-                              setReversingInvoice(inv);
-                              setReversalReason("");
-                            }}
-                            title="ابطال فاکتور و بازگردانی انبار"
-                            className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-amber-400 hover:text-amber-300 hover:border-amber-500 transition"
-                          >
-                            <RotateCcw className="h-4 w-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setDeletingInvoice(inv)}
-                          title="حذف فاکتور و بازگردانی انبار"
-                          className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-rose-500 hover:text-rose-400 hover:border-rose-600 transition"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
+                      {renderInvoiceActions(inv)}
                     </td>
                   </tr>
                 ))
@@ -937,7 +990,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       {/* Modal 1: Create Invoice */}
       {isAddModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsAddModalOpen(false);
           }}
@@ -1044,7 +1099,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                   </div>
                 </div>
 
-                <div className="overflow-x-auto rounded-2xl border border-slate-800">
+                <div className="responsive-table overflow-x-auto rounded-2xl border border-slate-800">
                   <table className="w-full text-right text-xs text-slate-300">
                     <thead className="bg-slate-900 text-slate-400 font-semibold">
                       <tr>
@@ -1237,7 +1292,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       {/* Modal 2: Reversal with reason */}
       {reversingInvoice && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) setReversingInvoice(null);
           }}
@@ -1295,7 +1352,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       {/* Modal 2.5: Delete Invoice Confirmation */}
       {deletingInvoice && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) setDeletingInvoice(null);
           }}
@@ -1345,7 +1404,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       {/* Modal 3: Payment & Settlement */}
       {editingInvoice && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setEditingInvoice(null);
           }}
@@ -1502,7 +1563,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       {/* Modal 4: Official Persian Invoice Print & JPG Export */}
       {viewingInvoice && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md overflow-y-auto print:p-0 print:m-0 print:bg-white print:static"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal invoice-preview-modal fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md overflow-y-auto print:p-0 print:m-0 print:bg-white print:static"
           onClick={(e) => {
             if (e.target === e.currentTarget) setViewingInvoice(null);
           }}
@@ -1777,7 +1840,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       {/* Modal 5: Full Invoice Editing Modal */}
       {editingFullInvoice && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setEditingFullInvoice(null);
           }}

@@ -369,7 +369,9 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
       {/* Modal 1: Add/Edit Customer */}
       {isAddModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsAddModalOpen(false);
           }}
@@ -574,7 +576,9 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
       {/* Modal 2: View Customer Profile */}
       {viewingProfile && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setViewingProfile(null);
           }}

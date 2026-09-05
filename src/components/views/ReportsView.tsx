@@ -989,7 +989,7 @@ export const ReportsView: React.FC<{
               <Users className="h-5 w-5 text-cyan-400" />
               عملکرد فروش و پورسانت همکاران و ویزیتورها
             </h3>
-            <div className="overflow-x-auto">
+            <div className="responsive-table overflow-x-auto">
               <table className="w-full text-right text-xs text-slate-300">
                 <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                   <tr>
@@ -1072,7 +1072,7 @@ export const ReportsView: React.FC<{
           {simResults.length > 0 && (
             <div className="rounded-3xl border border-slate-800 bg-slate-900/60 shadow-xl overflow-hidden p-6 space-y-4">
               <h4 className="text-sm font-bold text-white">نتایج شبیه‌سازی قیمت محصولات</h4>
-              <div className="overflow-x-auto">
+              <div className="responsive-table overflow-x-auto">
                 <table className="w-full text-right text-xs text-slate-300">
                   <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                     <tr>
@@ -1189,7 +1189,7 @@ export const ReportsView: React.FC<{
 
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
                   <h4 className="text-sm font-bold text-white mb-3">جدول مقایسه KPI</h4>
-                  <div className="overflow-x-auto">
+                  <div className="responsive-table overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead className="text-slate-400 border-b border-slate-800">
                         <tr><th className="p-2 text-right">شاخص</th><th className="p-2 text-center">{nameA}</th><th className="p-2 text-center">{nameB}</th><th className="p-2 text-center">اختلاف</th><th className="p-2 text-center">٪ اختلاف</th><th className="p-2 text-center">برتر</th></tr>
