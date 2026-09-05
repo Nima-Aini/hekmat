@@ -1,3 +1,4 @@
+import type { Transaction } from "./product";
 import { db } from "@/db";
 import { products, projectProductPrices, productRecipes, rawMaterials } from "@/db/schema";
 import { eq, and, desc, lte, gte, or, isNull } from "drizzle-orm";
@@ -17,9 +18,10 @@ export interface ResolvedPriceResult {
  */
 export async function resolveProductPrice(
   productId: string,
-  projectId?: string | null
+  projectId?: string | null,
+  client: Transaction | typeof db = db
 ): Promise<ResolvedPriceResult> {
-  const [product] = await db
+  const [product] = await client
     .select()
     .from(products)
     .where(eq(products.id, productId))
@@ -43,7 +45,7 @@ export async function resolveProductPrice(
   }
 
   // Strictly check both projectId AND productId
-  const [projectPriceRecord] = await db
+  const [projectPriceRecord] = await client
     .select()
     .from(projectProductPrices)
     .where(and(
@@ -80,8 +82,8 @@ export async function resolveProductPrice(
 /**
  * Calculates current BOM cost for a product based on raw materials
  */
-export async function calculateProductBOMCost(productId: string): Promise<number> {
-  const recipes = await db
+export async function calculateProductBOMCost(productId: string, client: Transaction | typeof db = db): Promise<number> {
+  const recipes = await client
     .select({
       quantityRequired: productRecipes.quantityRequired,
       wastagePercent: productRecipes.wastagePercent,
@@ -108,9 +110,9 @@ export async function calculateProductBOMCost(productId: string): Promise<number
 /**
  * Updates a product's calculated cost in DB based on its raw material BOM
  */
-export async function updateProductCostFromBOM(productId: string): Promise<number> {
-  const bomCost = await calculateProductBOMCost(productId);
-  await db
+export async function updateProductCostFromBOM(productId: string, client: Transaction | typeof db = db): Promise<number> {
+  const bomCost = await calculateProductBOMCost(productId, client);
+  await client
     .update(products)
     .set({
       calculatedCost: bomCost.toString(),

@@ -1,3 +1,6 @@
+import { assertUuid } from "@/lib/apiError";
+import { requirePermission } from "@/services/access";
+import { apiError } from "@/lib/apiError";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { employees, employeeProjectAssignments, products, specialProducts } from "@/db/schema";
@@ -9,7 +12,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requirePermission("employees.manage");
     const { id } = await params;
+    assertUuid(id);
     const [emp] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
     if (!emp) {
       return NextResponse.json({ success: false, error: "همکار یافت نشد" }, { status: 404 });
@@ -99,7 +104,7 @@ export async function GET(
     });
   } catch (error: any) {
     console.error("Error fetching employee product access:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -108,7 +113,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requirePermission("employees.manage");
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
     const { canSellAllProducts, allowedProductIds, allowedSpecialProductIds } = body;
 
@@ -160,6 +167,6 @@ export async function PUT(
     });
   } catch (error: any) {
     console.error("Error saving employee product access:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { accounts, payments, expenses } from "@/db/schema";
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
       },
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -105,7 +106,7 @@ export async function POST(req: Request) {
       message: `حساب «${newAccount.name}» با موفقیت ایجاد گردید.`,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -168,7 +169,7 @@ export async function PUT(req: Request) {
       message: `اطلاعات حساب «${updated.name}» با موفقیت ویرایش شد.`,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -211,6 +212,6 @@ export async function DELETE(req: Request) {
       message: `حساب «${deleted.name}» با موفقیت حذف شد.`,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

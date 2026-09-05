@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { expenses, accounts, projects } from "@/db/schema";
@@ -10,9 +12,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    try {
-      await requirePermission("expenses.view");
-    } catch {}
+    assertUuid(id);
+    await requirePermission("expenses.view");
 
     const [expense] = await db
       .select({
@@ -41,13 +42,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
     const context = await requirePermission("expenses.edit");
 
@@ -141,13 +143,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : error.message?.includes("موجودی") ? 400 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     const context = await requirePermission("expenses.delete");
 
     const deleted = await db.transaction(async (tx) => {
@@ -180,6 +183,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }

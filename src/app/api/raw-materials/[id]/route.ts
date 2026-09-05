@@ -1,3 +1,6 @@
+import { assertUuid } from "@/lib/apiError";
+import { requirePermission } from "@/services/access";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { rawMaterials } from "@/db/schema";
@@ -6,7 +9,9 @@ import { updateRawMaterial, getRawMaterialPriceHistory, deleteRawMaterial } from
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await requirePermission("raw_materials.view");
     const { id } = await params;
+    assertUuid(id);
     const [rm] = await db.select().from(rawMaterials).where(eq(rawMaterials.id, id)).limit(1);
     if (!rm) {
       return NextResponse.json({ success: false, error: "ماده اولیه یافت نشد" }, { status: 404 });
@@ -26,13 +31,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       priceHistory,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await requirePermission("raw_materials.update");
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
 
     const updated = await updateRawMaterial(id, {
@@ -52,16 +59,18 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
     return NextResponse.json({ success: true, rawMaterial: updated });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await requirePermission("raw_materials.update");
     const { id } = await params;
+    assertUuid(id);
     const result = await deleteRawMaterial(id);
     return NextResponse.json({ success: true, message: `ماده اولیه "${result.deletedName}" با موفقیت حذف گردید.` });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    return apiError(error);
   }
 }

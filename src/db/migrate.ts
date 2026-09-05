@@ -416,7 +416,7 @@ export async function migrateDatabase() {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       consignment_id UUID NOT NULL REFERENCES consignments(id) ON DELETE CASCADE,
       product_id UUID NOT NULL REFERENCES products(id),
-      quantity_out NUMERIC(15,4) NOT NULL,
+      quantity_out NUMERIC(15,4) NOT NULL DEFAULT 0,
       quantity_returned NUMERIC(15,4) DEFAULT 0,
       unit_price NUMERIC(15,2) NOT NULL,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
@@ -529,6 +529,7 @@ export async function migrateDatabase() {
           AND table_name = 'consignment_items'
           AND column_name = 'quantity_out'
       ) THEN
+        ALTER TABLE consignment_items ALTER COLUMN quantity_out SET DEFAULT 0;
         EXECUTE $sql$
           UPDATE consignment_items
           SET quantity_delivered = COALESCE(quantity_delivered, quantity_out, 0),
@@ -666,9 +667,15 @@ export async function migrateDatabase() {
       ALTER COLUMN total_cost_snapshot SET NOT NULL,
       ALTER COLUMN waste_quantity SET DEFAULT 0;
 
-    -- Drop old legacy columns that conflict with Drizzle schema
-    ALTER TABLE production_batch_items DROP COLUMN IF EXISTS quantity_used;
-    ALTER TABLE production_batch_items DROP COLUMN IF EXISTS total_cost;
+    -- Retain legacy values for rollback; new inserts must not require legacy fields.
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'production_batch_items' AND column_name = 'quantity_used') THEN
+        ALTER TABLE production_batch_items ALTER COLUMN quantity_used SET DEFAULT 0;
+      END IF;
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'production_batch_items' AND column_name = 'total_cost') THEN
+        ALTER TABLE production_batch_items ALTER COLUMN total_cost SET DEFAULT 0;
+      END IF;
+    END $$;
 
     ALTER TABLE production_batches
       ADD COLUMN IF NOT EXISTS total_material_cost NUMERIC(15,2) DEFAULT 0;
@@ -934,7 +941,7 @@ export async function migrateDatabase() {
       ('commissions.view','مشاهده پورسانت'),('commissions.manage','مدیریت پورسانت'),('reports.view','مشاهده گزارش'),('reports.export','خروجی گزارش'),('reports.simulate','شبیه‌سازی گزارش'),('cost.view','مشاهده قیمت خرید'),
       ('profit.view','مشاهده سود'),('projects.view','مشاهده پروژه'),('projects.update','تغییر پروژه'),
       ('customers.transfer','انتقال مشتری'),('employees.manage','مدیریت همکاران'),('employees.view','مشاهده همکاران'),('employees.offboard','収束 همکار'),('projects.create','ایجاد پروژه'),('projects.archive','آرشیو پروژه'),('projects.price.manage','مدیریت قیمت پروژه'),('projects.commission.manage','مدیریت پورسانت پروژه'),('projects.expense.manage','مدیریت هزینه پروژه'),('tasks.manage','مدیریت وظایف'),('payments.create','ثبت پرداخت'),('payments.view','مشاهده پرداخت'),
-      ('products.view','مشاهده محصولات'),('products.create','ایجاد محصول'),('products.update','ویرایش محصول'),
+      ('products.view','مشاهده محصولات'),('products.create','ایجاد محصول'),('products.update','ویرایش محصول'),('products.delete','حذف یا بایگانی محصول'),
       ('raw_materials.view','مشاهده مواد اولیه'),('raw_materials.create','ایجاد ماده اولیه'),('raw_materials.update','ویرایش ماده اولیه'),
       ('suppliers.view','مشاهده تامین‌کنندگان'),('suppliers.create','ایجاد تامین‌کننده'),('suppliers.update','ویرایش تامین‌کننده'),
       ('production.view','مشاهده تولید'),('production.create','ثبت تولید'),('inventory.view','مشاهده انبار'),('purchases.view','مشاهده خرید'),('purchases.create','ایجاد خرید'),('purchases.edit','ویرایش خرید'),('purchases.delete','حذف خرید'),
@@ -962,6 +969,19 @@ export async function migrateDatabase() {
     INSERT INTO role_permissions(role_id, permission_id)
       SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN ('customers.view','invoices.view','invoices.create','invoices.update','payments.view','payments.create','reports.view','cost.view','profit.view','projects.view','products.view','raw_materials.view','suppliers.view','financial.view','expenses.view','expenses.create','purchases.view','global_search') WHERE r.code='accountant'
     ON CONFLICT DO NOTHING;
+
+    -- Legacy columns are retained without requiring obsolete fields on new inserts.
+    ALTER TABLE raw_material_price_history ALTER COLUMN previous_cost DROP NOT NULL;
+    ALTER TABLE payroll_records ALTER COLUMN period_start DROP NOT NULL;
+    ALTER TABLE payroll_records ALTER COLUMN period_end DROP NOT NULL;
+
+    -- 20260905 request idempotency: nullable additions retain all existing rows.
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS request_key TEXT;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS request_hash TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS request_key TEXT;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS request_hash TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS invoices_request_key_unique ON invoices(request_key);
+    CREATE UNIQUE INDEX IF NOT EXISTS payments_request_key_unique ON payments(request_key);
 
     -- Phase 21: Performance Indexes
     CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);

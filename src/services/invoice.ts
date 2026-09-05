@@ -1,3 +1,5 @@
+import type { Transaction } from "./product";
+import { ApiError, decimal } from "@/lib/apiError";
 import crypto from "node:crypto";
 import { db } from "@/db";
 import {
@@ -38,6 +40,8 @@ export interface CreateInvoiceItemInput {
 }
 
 export interface CreateInvoiceInput {
+  requestKey?: string;
+  requestHash?: string;
   customerId: string;
   projectId?: string | null;
   salesMode?: "direct" | "visitor" | "visitor_intermediary" | "intermediary";
@@ -61,14 +65,14 @@ export interface CreateInvoiceInput {
 /**
  * Generates a concurrency-safe unique invoice number using counter-based approach
  */
-export async function generateInvoiceNumber(): Promise<string> {
+export async function generateInvoiceNumber(client: Transaction | typeof db = db): Promise<string> {
   const datePrefix = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   // Use a combination of timestamp and crypto random for better uniqueness
   const timestamp = Date.now().toString(36);
   const randomSuffix = crypto.randomBytes(3).toString("hex");
   const candidate = `INV-${datePrefix}-${timestamp}${randomSuffix}`;
 
-  const [existing] = await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.invoiceNumber, candidate)).limit(1);
+  const [existing] = await client.select({ id: invoices.id }).from(invoices).where(eq(invoices.invoiceNumber, candidate)).limit(1);
   if (existing) {
     // Fallback: use db-level sequence approach
     const fallback = `INV-${datePrefix}-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -82,13 +86,25 @@ export async function generateInvoiceNumber(): Promise<string> {
  * Atomic: Runs Invoice, Items, Inventory Ledger, Payment, Commission, and Audit in one transactional flow!
  */
 export async function createInvoice(input: CreateInvoiceInput) {
+  if (!Array.isArray(input.items) || !input.items.length) throw new ApiError(400, "حداقل یک قلم فاکتور الزامی است.");
+  decimal(input.invoiceDiscount ?? 0, "تخفیف");
+  decimal(input.taxTotal ?? 0, "مالیات");
+  if (input.initialPayment) decimal(input.initialPayment.amount, "پرداخت");
   const customerId = input.customerId;
 
   return await db.transaction(async (tx) => {
+    if (input.requestKey) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.requestKey}, 0))`);
+      const [prior] = await tx.select().from(invoices).where(eq(invoices.requestKey, input.requestKey)).limit(1);
+      if (prior) {
+        if (prior.requestHash !== input.requestHash) throw new ApiError(409, "این کلید درخواست قبلاً با اطلاعات دیگری استفاده شده است.");
+        return prior;
+      }
+    }
     const [customer] = await tx.select().from(customers).where(eq(customers.id, customerId)).limit(1);
     if (!customer) throw new Error("مشتری پیدا نشد");
 
-    const invoiceNum = input.manualInvoiceNumber || (await generateInvoiceNumber());
+    const invoiceNum = input.manualInvoiceNumber || (await generateInvoiceNumber(tx));
 
     let subtotal = 0;
     let lineDiscountsTotal = 0;
@@ -96,12 +112,23 @@ export async function createInvoice(input: CreateInvoiceInput) {
 
     // Process and validate items
     const processedItems = [];
-    for (const itemInput of input.items) {
+    for (const sourceItem of input.items) {
+      const itemInput = { ...sourceItem };
+      // Unified special products use the standard inventory and FK path.
+      if (itemInput.specialProductId || itemInput.productType === "special_product") {
+        const candidate = itemInput.specialProductId || itemInput.productId;
+        if (candidate) {
+          const [unified] = await tx.select({ id: products.id }).from(products).where(eq(products.id, candidate)).limit(1);
+          if (unified) { itemInput.productId = unified.id; itemInput.specialProductId = null; itemInput.productType = "product"; }
+        }
+      }
       const qty = Number(itemInput.quantity);
       if (!Number.isFinite(qty) || qty <= 0) {
         throw new Error("مقدار هر قلم باید عددی معتبر و بزرگتر از صفر باشد.");
       }
-      const disc = Number(itemInput.discountAmount || 0);
+      const disc = Number(decimal(itemInput.discountAmount ?? 0, "تخفیف"));
+      if (itemInput.unitPrice !== undefined) decimal(itemInput.unitPrice, "قیمت");
+      if (itemInput.unitCost !== undefined) decimal(itemInput.unitCost, "هزینه");
 
       // Check if item is a Special Product (from specialProducts table or products table with isSpecial = true)
       let specialProd = null;
@@ -110,8 +137,7 @@ export async function createInvoice(input: CreateInvoiceInput) {
           .select()
           .from(specialProducts)
           .where(eq(specialProducts.id, itemInput.specialProductId || itemInput.productId!))
-          .limit(1)
-          .catch(() => []);
+          .limit(1);
         if (sp) {
           specialProd = sp;
         } else {
@@ -149,7 +175,8 @@ export async function createInvoice(input: CreateInvoiceInput) {
           throw new Error(`تخفیف محصول اختصاصی «${spName}» نمی‌تواند بیشتر از مبلغ کل آن باشد.`);
         }
         const unitCost = 0;
-        const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
+        if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
+          const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
         const lineCogs = 0;
         const lineProfit = lineTotal;
 
@@ -186,7 +213,8 @@ export async function createInvoice(input: CreateInvoiceInput) {
         // Check standard catalog product first, or fallback to special product check
         const [product] = await tx.select().from(products).where(eq(products.id, itemInput.productId)).limit(1);
         if (product) {
-          const resolvedPrice = await resolveProductPrice(product.id, input.projectId);
+          if (product.status !== "active") throw new ApiError(409, "محصول غیرفعال یا بایگانی‌شده قابل فروش نیست.");
+          const resolvedPrice = await resolveProductPrice(product.id, input.projectId, tx);
           const unitPrice = itemInput.unitPrice !== undefined ? Number(itemInput.unitPrice) : resolvedPrice.effectivePrice;
           if (!Number.isFinite(unitPrice) || unitPrice < 0) {
             throw new Error(`قیمت واحد محصول «${product.name}» نامعتبر است.`);
@@ -195,6 +223,7 @@ export async function createInvoice(input: CreateInvoiceInput) {
             throw new Error(`تخفیف محصول «${product.name}» نمی‌تواند بیشتر از مبلغ کل آن باشد.`);
           }
           const unitCost = Number(product.calculatedCost) || Number(product.basePrice) || 0;
+          if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
           const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
           const lineCogs = Math.round(qty * unitCost * 100) / 100;
           const lineProfit = Math.round((lineTotal - lineCogs) * 100) / 100;
@@ -229,7 +258,8 @@ export async function createInvoice(input: CreateInvoiceInput) {
             const unitPrice =
               itemInput.unitPrice !== undefined ? Number(itemInput.unitPrice) : Number(sp.basePrice) || 0;
             const unitCost = 0;
-            const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
+            if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
+          const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
             const lineCogs = 0;
             const lineProfit = lineTotal;
 
@@ -270,7 +300,8 @@ export async function createInvoice(input: CreateInvoiceInput) {
         const customName = (itemInput.productName || itemInput.productNameSnapshot || "کالای متفرقه").trim();
         const unitPrice = itemInput.unitPrice !== undefined ? Number(itemInput.unitPrice) : 0;
         const unitCost = Number(itemInput.unitCost || 0);
-        const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
+        if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
+          const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
         const lineCogs = Math.round(qty * unitCost * 100) / 100;
         const lineProfit = Math.round((lineTotal - lineCogs) * 100) / 100;
 
@@ -299,11 +330,13 @@ export async function createInvoice(input: CreateInvoiceInput) {
 
     const invoiceDiscount = input.invoiceDiscount || 0;
     const taxTotal = input.taxTotal || 0;
-    const grandTotal = Math.max(0, subtotal - lineDiscountsTotal - invoiceDiscount + taxTotal);
+    if (invoiceDiscount > subtotal - lineDiscountsTotal) throw new ApiError(400, "تخفیف از مبلغ فاکتور بیشتر است.");
+    const grandTotal = subtotal - lineDiscountsTotal - invoiceDiscount + taxTotal;
     const grossProfitTotal = grandTotal - cogsTotal;
 
     // Handle Initial Payment if provided
-    const initialPayAmount = input.initialPayment ? Math.min(grandTotal, input.initialPayment.amount) : 0;
+    if (input.initialPayment && Number(input.initialPayment.amount) > grandTotal) throw new ApiError(400, "پرداخت از مبلغ فاکتور بیشتر است.");
+    const initialPayAmount = input.initialPayment ? Number(input.initialPayment.amount) : 0;
     const balanceDue = grandTotal - initialPayAmount;
 
     let paymentStatus: "unpaid" | "partial" | "paid" = "unpaid";
@@ -318,6 +351,8 @@ export async function createInvoice(input: CreateInvoiceInput) {
       .insert(invoices)
       .values({
         invoiceNumber: invoiceNum,
+        requestKey: input.requestKey,
+        requestHash: input.requestHash,
         customerId,
         projectId: input.projectId || null,
         salesMode: input.salesMode || "direct",
@@ -473,14 +508,14 @@ export async function createInvoice(input: CreateInvoiceInput) {
     }
 
     // Recalculate customer health score automatically
-    await recalculateCustomerHealth(customerId);
+    await recalculateCustomerHealth(customerId, tx);
 
     await logAuditEvent("CREATE", "invoice", createdInvoice.id, {
       invoiceNumber: invoiceNum,
       grandTotal,
       customerId,
       itemsCount: processedItems.length,
-    });
+    }, undefined, tx);
 
     return createdInvoice;
   });
@@ -491,9 +526,9 @@ export async function createInvoice(input: CreateInvoiceInput) {
  */
 export async function reverseInvoice(invoiceId: string, reason: string) {
   return await db.transaction(async (tx) => {
-    const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+    const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for("update").limit(1);
     if (!inv) throw new Error("فاکتور پیدا نشد");
-    if (inv.status === "reversed") throw new Error("این فاکتور قبلاً باطل شده است");
+    if (inv.status === "reversed" || inv.status === "cancelled") throw new ApiError(409, "این فاکتور قبلاً باطل شده است");
 
     const items = await tx.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
 
@@ -574,8 +609,8 @@ export async function reverseInvoice(invoiceId: string, reason: string) {
       .where(eq(invoices.id, invoiceId))
       .returning();
 
-    await recalculateCustomerHealth(inv.customerId);
-    await logAuditEvent("REVERSE", "invoice", invoiceId, { invoiceNumber: inv.invoiceNumber, reason });
+    await recalculateCustomerHealth(inv.customerId, tx);
+    await logAuditEvent("REVERSE", "invoice", invoiceId, { invoiceNumber: inv.invoiceNumber, reason }, undefined, tx);
 
     return updated;
   });
@@ -600,10 +635,13 @@ export async function updateInvoice(
   }
 ) {
   return await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+    const [existing] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for("update").limit(1);
     if (!existing) throw new Error("فاکتور پیدا نشد");
 
-    const patch: any = { updatedAt: new Date() };
+    if (existing.status !== "issued" && existing.status !== "corrected") throw new ApiError(409, "فاکتور باطل‌شده قابل ویرایش نیست.");
+    if (input.invoiceDiscount !== undefined) decimal(input.invoiceDiscount, "تخفیف");
+    if (input.items !== undefined && (!Array.isArray(input.items) || !input.items.length)) throw new ApiError(400, "حداقل یک قلم الزامی است.");
+    const patch: Partial<typeof invoices.$inferInsert> = { updatedAt: new Date() };
 
     if (input.customerId !== undefined && input.customerId !== existing.customerId) {
       const [c] = await tx.select().from(customers).where(eq(customers.id, input.customerId)).limit(1);
@@ -611,85 +649,11 @@ export async function updateInvoice(
       patch.customerId = input.customerId;
     }
 
-    if (input.employeeId !== undefined) {
-      patch.employeeId = input.employeeId || null;
-      // Recalculate commission attribution if employee changed
-      if (input.employeeId !== existing.employeeId) {
-        // Delete old commission entries
-        await tx
-          .delete(commissionLedger)
-          .where(eq(commissionLedger.invoiceId, invoiceId));
-
-        // Recalculate commission for new employee if assigned
-        if (input.employeeId) {
-          const [emp] = await tx.select().from(employees).where(eq(employees.id, input.employeeId)).limit(1);
-          if (emp) {
-            const invItems = await tx.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
-            const rules = await tx.select().from(commissionRules).where(eq(commissionRules.isActive, true));
-            const inv = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
-            const invoiceRecord = inv[0];
-
-            if (invoiceRecord && invItems.length > 0) {
-              let totalCommission = 0;
-              const snapshots: Array<Record<string, unknown>> = [];
-
-              for (const item of invItems) {
-                const lineTotal = Number(item.lineTotal) || 0;
-                const lineProfit = Number(item.lineProfit) || 0;
-
-                const eligible = rules
-                  .filter((rule: any) => {
-                    if (rule.employeeId && rule.employeeId !== input.employeeId) return false;
-                    if (rule.projectId && rule.projectId !== invoiceRecord.projectId) return false;
-                    if (rule.productId && rule.productId !== item.productId) return false;
-                    const now = invoiceRecord.invoiceDate || new Date();
-                    if (rule.effectiveStartDate && now < rule.effectiveStartDate) return false;
-                    if (rule.effectiveEndDate && now > rule.effectiveEndDate) return false;
-                    return true;
-                  })
-                  .sort((a: any, b: any) => {
-                    const score = (r: any) => (r.employeeId ? 8 : 0) + (r.projectId ? 4 : 0) + (r.productId ? 2 : 0);
-                    return score(b) - score(a);
-                  });
-
-                const rule = eligible[0];
-                const rate = rule ? Number(rule.rateValue) : Number(emp.commissionRatePercent) || 5;
-                const commissionBase = rule?.commissionBase || (emp as any).commissionBase || "sales_total";
-                const base = commissionBase === "net_profit" ? Math.max(0, lineProfit) : lineTotal;
-                const amount = rule?.ruleType === "fixed" ? rate : Math.round((base * rate) / 100);
-                totalCommission += amount;
-                snapshots.push({
-                  productId: item.productId,
-                  ruleId: rule?.id || null,
-                  ruleType: rule?.ruleType || "employee_default",
-                  commissionBase,
-                  rateValue: rate,
-                  baseAmount: base,
-                  lineTotal,
-                  lineProfit,
-                  commissionAmount: amount,
-                });
-              }
-
-              if (totalCommission > 0) {
-                const primaryBase = (emp as any).commissionBase || "sales_total";
-                await tx.insert(commissionLedger).values({
-                  employeeId: input.employeeId,
-                  invoiceId: invoiceRecord.id,
-                  projectId: invoiceRecord.projectId || null,
-                  ruleSnapshot: { invoiceNumber: invoiceRecord.invoiceNumber, commissionBase: primaryBase, items: snapshots },
-                  baseAmount: (primaryBase === "net_profit" ? Number(invoiceRecord.grossProfitTotal) : Number(invoiceRecord.grandTotal)).toString(),
-                  commissionAmount: totalCommission.toString(),
-                  status: "pending",
-                  commissionType: "employee",
-                  recipientEmployeeId: input.employeeId,
-                  notes: `پورسانت بازنگری شده فاکتور #${invoiceRecord.invoiceNumber}`,
-                });
-              }
-            }
-          }
-        }
-      }
+    if (input.employeeId !== undefined) patch.employeeId = input.employeeId;
+    const changesCommission = input.employeeId !== undefined || input.items !== undefined || input.invoiceDiscount !== undefined || input.projectId !== undefined;
+    if (changesCommission) {
+      const entries = await tx.select().from(commissionLedger).where(eq(commissionLedger.invoiceId, invoiceId));
+      if (entries.some(entry => entry.status === "paid" || entry.status === "settled")) throw new ApiError(409, "فاکتور دارای پورسانت تسویه‌شده است؛ اصلاح آن نیاز به تعدیل مالی دارد.");
     }
 
     if (input.projectId !== undefined) patch.projectId = input.projectId || null;
@@ -699,7 +663,8 @@ export async function updateInvoice(
     if (input.invoiceDate !== undefined) patch.invoiceDate = input.invoiceDate;
     if (input.dueDate !== undefined) patch.dueDate = input.dueDate;
     if (input.notes !== undefined) patch.notes = input.notes || null;
-    if (input.paymentStatus !== undefined) patch.paymentStatus = input.paymentStatus;
+    const actualPaymentStatus = Number(existing.balanceDue) === 0 ? "paid" : Number(existing.paidAmount) > 0 ? "partial" : "unpaid";
+    if (input.paymentStatus !== undefined && input.paymentStatus !== actualPaymentStatus) throw new ApiError(400, "وضعیت پرداخت از تراکنش‌های مالی محاسبه می‌شود؛ پرداخت را در بخش وصول ثبت کنید.");
 
     // If items are updated, recalculate line items and totals
     if (input.items && Array.isArray(input.items) && input.items.length > 0) {
@@ -735,12 +700,23 @@ export async function updateInvoice(
 
       const effectiveProjectId = patch.projectId !== undefined ? patch.projectId : existing.projectId;
 
-      for (const itemInput of input.items) {
+      for (const sourceItem of input.items) {
+      const itemInput = { ...sourceItem };
+      // Unified special products use the standard inventory and FK path.
+      if (itemInput.specialProductId || itemInput.productType === "special_product") {
+        const candidate = itemInput.specialProductId || itemInput.productId;
+        if (candidate) {
+          const [unified] = await tx.select({ id: products.id }).from(products).where(eq(products.id, candidate)).limit(1);
+          if (unified) { itemInput.productId = unified.id; itemInput.specialProductId = null; itemInput.productType = "product"; }
+        }
+      }
         const qty = Number(itemInput.quantity);
         if (!Number.isFinite(qty) || qty <= 0) {
           throw new Error("مقدار هر قلم باید عددی معتبر و بزرگتر از صفر باشد.");
         }
-        const disc = Number(itemInput.discountAmount || 0);
+        const disc = Number(decimal(itemInput.discountAmount ?? 0, "تخفیف"));
+      if (itemInput.unitPrice !== undefined) decimal(itemInput.unitPrice, "قیمت");
+      if (itemInput.unitCost !== undefined) decimal(itemInput.unitCost, "هزینه");
 
         let specialProd = null;
         if (itemInput.specialProductId || itemInput.productType === "special_product") {
@@ -767,6 +743,7 @@ export async function updateInvoice(
             throw new Error(`تخفیف محصول اختصاصی «${spName}» نمی‌تواند بیشتر از مبلغ کل آن باشد.`);
           }
           const unitCost = 0;
+          if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
           const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
           const lineCogs = 0;
           const lineProfit = lineTotal;
@@ -794,7 +771,8 @@ export async function updateInvoice(
         } else if (itemInput.productId) {
           const [product] = await tx.select().from(products).where(eq(products.id, itemInput.productId!)).limit(1);
           if (product) {
-            const resolvedPrice = await resolveProductPrice(product.id, effectiveProjectId);
+          if (product.status !== "active") throw new ApiError(409, "محصول غیرفعال یا بایگانی‌شده قابل فروش نیست.");
+            const resolvedPrice = await resolveProductPrice(product.id, effectiveProjectId, tx);
             const unitPrice = itemInput.unitPrice !== undefined ? Number(itemInput.unitPrice) : resolvedPrice.effectivePrice;
             if (!Number.isFinite(unitPrice) || unitPrice < 0) {
               throw new Error(`قیمت واحد محصول «${product.name}» نامعتبر است.`);
@@ -803,7 +781,8 @@ export async function updateInvoice(
               throw new Error(`تخفیف محصول «${product.name}» نمی‌تواند بیشتر از مبلغ کل آن باشد.`);
             }
             const unitCost = Number(product.calculatedCost) || Number(product.basePrice) || 0;
-            const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
+            if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
+          const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
             const lineCogs = Math.round(qty * unitCost * 100) / 100;
             const lineProfit = Math.round((lineTotal - lineCogs) * 100) / 100;
 
@@ -836,7 +815,8 @@ export async function updateInvoice(
               const unitPrice =
                 itemInput.unitPrice !== undefined ? Number(itemInput.unitPrice) : Number(sp.basePrice) || 0;
               const unitCost = 0;
-              const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
+              if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
+          const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
               const lineCogs = 0;
               const lineProfit = lineTotal;
 
@@ -868,6 +848,7 @@ export async function updateInvoice(
           const customName = (itemInput.productName || itemInput.productNameSnapshot || "کالای متفرقه").trim();
           const unitPrice = itemInput.unitPrice !== undefined ? Number(itemInput.unitPrice) : 0;
           const unitCost = Number(itemInput.unitCost || 0);
+          if (disc > qty * unitPrice) throw new ApiError(400, "تخفیف از مبلغ قلم بیشتر است.");
           const lineTotal = Math.round((qty * unitPrice - disc) * 100) / 100;
           const lineCogs = Math.round(qty * unitCost * 100) / 100;
           const lineProfit = Math.round((lineTotal - lineCogs) * 100) / 100;
@@ -898,10 +879,12 @@ export async function updateInvoice(
       const invoiceDiscount =
         input.invoiceDiscount !== undefined ? input.invoiceDiscount : Number(existing.invoiceDiscount) || 0;
       const taxTotal = Number(existing.taxTotal) || 0;
-      const grandTotal = Math.max(0, subtotal - lineDiscountsTotal - invoiceDiscount + taxTotal);
+      if (invoiceDiscount > subtotal - lineDiscountsTotal) throw new ApiError(400, "تخفیف از مبلغ فاکتور بیشتر است.");
+    const grandTotal = subtotal - lineDiscountsTotal - invoiceDiscount + taxTotal;
       const grossProfitTotal = grandTotal - cogsTotal;
       const paidAmount = Number(existing.paidAmount) || 0;
-      const balanceDue = Math.max(0, grandTotal - paidAmount);
+      if (paidAmount > grandTotal) throw new ApiError(409, "مبلغ جدید از پرداخت ثبت‌شده کمتر است؛ ابتدا پرداخت را اصلاح کنید.");
+      const balanceDue = grandTotal - paidAmount;
 
       let paymentStatus: "unpaid" | "partial" | "paid" = "unpaid";
       if (paidAmount >= grandTotal && grandTotal > 0) {
@@ -958,12 +941,16 @@ export async function updateInvoice(
       const subtotal = Number(existing.subtotal) || 0;
       const lineDiscountsTotal = Number(existing.lineDiscountsTotal) || 0;
       const taxTotal = Number(existing.taxTotal) || 0;
-      const grandTotal = Math.max(0, subtotal - lineDiscountsTotal - input.invoiceDiscount + taxTotal);
+      if (input.invoiceDiscount > subtotal - lineDiscountsTotal) throw new ApiError(400, "تخفیف از مبلغ فاکتور بیشتر است.");
+      const grandTotal = subtotal - lineDiscountsTotal - input.invoiceDiscount + taxTotal;
       const paidAmount = Number(existing.paidAmount) || 0;
-      const balanceDue = Math.max(0, grandTotal - paidAmount);
+      if (paidAmount > grandTotal) throw new ApiError(409, "مبلغ جدید از پرداخت ثبت‌شده کمتر است؛ ابتدا پرداخت را اصلاح کنید.");
+      const balanceDue = grandTotal - paidAmount;
 
       patch.invoiceDiscount = input.invoiceDiscount.toString();
       patch.grandTotal = grandTotal.toString();
+      patch.grossProfitTotal = (grandTotal - Number(existing.cogsTotal)).toString();
+      patch.paymentStatus = balanceDue === 0 ? "paid" : paidAmount > 0 ? "partial" : "unpaid";
       patch.balanceDue = balanceDue.toString();
     }
 
@@ -973,96 +960,104 @@ export async function updateInvoice(
       .where(eq(invoices.id, invoiceId))
       .returning();
 
+    if (changesCommission) {
+      const commissionEmployeeId = input.employeeId !== undefined ? input.employeeId : existing.employeeId;
+      // Recalculate commission attribution if employee changed
+      if (changesCommission) {
+        // Delete old commission entries
+        await tx
+          .update(commissionLedger).set({ status: "reversed", notes: "بازنگری فاکتور" })
+          .where(eq(commissionLedger.invoiceId, invoiceId));
+
+        // Recalculate commission for new employee if assigned
+        if (commissionEmployeeId) {
+          const [emp] = await tx.select().from(employees).where(eq(employees.id, commissionEmployeeId)).limit(1);
+          if (emp) {
+            const invItems = await tx.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+            const rules = await tx.select().from(commissionRules).where(eq(commissionRules.isActive, true));
+            const inv = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for("update").limit(1);
+            const invoiceRecord = inv[0];
+
+            if (invoiceRecord && invItems.length > 0) {
+              let totalCommission = 0;
+              const snapshots: Array<Record<string, unknown>> = [];
+
+              for (const item of invItems) {
+                const lineTotal = Number(item.lineTotal) || 0;
+                const lineProfit = Number(item.lineProfit) || 0;
+
+                const eligible = rules
+                  .filter((rule: any) => {
+                    if (rule.employeeId && rule.employeeId !== commissionEmployeeId) return false;
+                    if (rule.projectId && rule.projectId !== invoiceRecord.projectId) return false;
+                    if (rule.productId && rule.productId !== item.productId) return false;
+                    const now = invoiceRecord.invoiceDate || new Date();
+                    if (rule.effectiveStartDate && now < rule.effectiveStartDate) return false;
+                    if (rule.effectiveEndDate && now > rule.effectiveEndDate) return false;
+                    return true;
+                  })
+                  .sort((a: any, b: any) => {
+                    const score = (r: any) => (r.employeeId ? 8 : 0) + (r.projectId ? 4 : 0) + (r.productId ? 2 : 0);
+                    return score(b) - score(a);
+                  });
+
+                const rule = eligible[0];
+                const rate = rule ? Number(rule.rateValue) : Number(emp.commissionRatePercent) || 5;
+                const commissionBase = rule?.commissionBase || (emp as any).commissionBase || "sales_total";
+                const base = commissionBase === "net_profit" ? Math.max(0, lineProfit) : lineTotal;
+                const amount = rule?.ruleType === "fixed" ? rate : Math.round((base * rate) / 100);
+                totalCommission += amount;
+                snapshots.push({
+                  productId: item.productId,
+                  ruleId: rule?.id || null,
+                  ruleType: rule?.ruleType || "employee_default",
+                  commissionBase,
+                  rateValue: rate,
+                  baseAmount: base,
+                  lineTotal,
+                  lineProfit,
+                  commissionAmount: amount,
+                });
+              }
+
+              if (totalCommission > 0) {
+                const primaryBase = (emp as any).commissionBase || "sales_total";
+                await tx.insert(commissionLedger).values({
+                  employeeId: commissionEmployeeId,
+                  invoiceId: invoiceRecord.id,
+                  projectId: invoiceRecord.projectId || null,
+                  ruleSnapshot: { invoiceNumber: invoiceRecord.invoiceNumber, commissionBase: primaryBase, items: snapshots },
+                  baseAmount: (primaryBase === "net_profit" ? Number(invoiceRecord.grossProfitTotal) : Number(invoiceRecord.grandTotal)).toString(),
+                  commissionAmount: totalCommission.toString(),
+                  status: "pending",
+                  commissionType: "employee",
+                  recipientEmployeeId: commissionEmployeeId,
+                  notes: `پورسانت بازنگری شده فاکتور #${invoiceRecord.invoiceNumber}`,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+
     if (patch.customerId || existing.customerId) {
-      await recalculateCustomerHealth(patch.customerId || existing.customerId);
+      await recalculateCustomerHealth(patch.customerId || existing.customerId, tx);
     }
 
     await logAuditEvent("UPDATE", "invoice", invoiceId, {
       fields: Object.keys(patch),
       employeeId: patch.employeeId ?? existing.employeeId,
       grandTotal: patch.grandTotal ?? existing.grandTotal,
-    });
+    }, undefined, tx);
 
     return updated;
   });
 }
 
-/**
- * Permanently deletes and removes an invoice, reverting inventory and commissions
- */
+/** Retain financial history; deletion means audited reversal. */
 export async function deleteInvoice(invoiceId: string, reason?: string) {
-  return await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
-    if (!existing) {
-      throw new Error("فاکتور مورد نظر یافت نشد.");
-    }
-
-    // 1. If invoice was not cancelled/reversed, restore stock for products AND reverse payments
-    if (existing.status !== "cancelled" && existing.status !== "reversed") {
-      const items = await tx.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
-      for (const item of items) {
-        if (item.productId && !item.isCustom) {
-          await recordInventoryTransaction(
-            {
-              itemType: "product",
-              itemId: item.productId,
-              transactionType: "adjustment",
-              quantityChange: Number(item.quantity), // Positive to restore stock
-              unitCostSnapshot: Number(item.unitCostSnapshot),
-              referenceType: "invoice_void",
-              referenceId: invoiceId,
-              projectId: existing.projectId || null,
-              notes: `بازگشت موجودی کالا بابت حذف فاکتور #${existing.invoiceNumber}`,
-            },
-            tx
-          );
-        }
-      }
-
-      // Reverse any completed payments linked to this invoice
-      const linkedPayments = await tx
-        .select()
-        .from(payments)
-        .where(eq(payments.invoiceId, invoiceId));
-
-      for (const pay of linkedPayments) {
-        if (pay.status === "completed" && pay.accountId) {
-          await tx
-            .update(accounts)
-            .set({ balance: sql`${accounts.balance} - ${Number(pay.amount) || 0}` })
-            .where(eq(accounts.id, pay.accountId));
-        }
-        await tx
-          .update(payments)
-          .set({ status: "cancelled", notes: sql`COALESCE(notes, '') || ' (ابطال بابت حذف فاکتور #${existing.invoiceNumber})'` })
-          .where(eq(payments.id, pay.id));
-      }
-    }
-
-    // 2. Void or remove linked commissions
-    await tx
-      .update(commissionLedger)
-      .set({
-        status: "reversed",
-        notes: sql`COALESCE(notes, '') || ' (ابطال شده بابت حذف فاکتور)'`,
-      })
-      .where(eq(commissionLedger.invoiceId, invoiceId));
-
-    // 3. Delete invoice items, payment allocations, and the invoice
-    await tx.delete(paymentAllocations).where(eq(paymentAllocations.invoiceId, invoiceId));
-    await tx.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
-    await tx.delete(invoices).where(eq(invoices.id, invoiceId));
-
-    if (existing.customerId) {
-      await recalculateCustomerHealth(existing.customerId);
-    }
-
-    await logAuditEvent("DELETE", "invoice", invoiceId, {
-      invoiceNumber: existing.invoiceNumber,
-      grandTotal: existing.grandTotal,
-      reason: reason || "حذف مستقیم توسط مدیر",
-    });
-
-    return { success: true, message: `فاکتور #${existing.invoiceNumber} با موفقیت حذف گردید.` };
-  });
+  await reverseInvoice(invoiceId, reason || "ابطال به درخواست حذف");
+  return { success: true, message: "فاکتور باطل شد؛ سوابق مالی حفظ شدند." };
 }

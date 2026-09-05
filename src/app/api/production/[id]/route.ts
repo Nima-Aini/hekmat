@@ -1,9 +1,14 @@
+import { assertUuid } from "@/lib/apiError";
+import { requirePermission } from "@/services/access";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { deleteProductionBatch } from "@/services/production";
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await requirePermission("production.create");
     const { id } = await params;
+    assertUuid(id);
     if (!id) {
       return NextResponse.json({ success: false, error: "شناسه بچ تولید الزامی است." }, { status: 400 });
     }
@@ -11,6 +16,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const result = await deleteProductionBatch(id);
     return NextResponse.json(result);
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

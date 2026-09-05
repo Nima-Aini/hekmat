@@ -1,3 +1,5 @@
+import { apiError } from "@/lib/apiError";
+import { pageNumber } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { expenses, accounts, projects } from "@/db/schema";
@@ -12,14 +14,9 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get("projectId");
     
-    let context: any = null;
-    try {
-      context = await requirePermission("expenses.view", projectId || undefined);
-    } catch (e: any) {
-      console.warn("requirePermission notice in GET /api/expenses:", e?.message);
-    }
+    const context = await requirePermission("expenses.view", projectId || undefined);
 
-    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
+    const page = pageNumber(searchParams.get("page"), 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "50", 10)));
     const offset = (page - 1) * pageSize;
 
@@ -63,19 +60,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, expenses: formatted, pagination: { page, pageSize, total } });
   } catch (error: any) {
     console.error("GET /api/expenses error:", error);
-    return NextResponse.json({ success: false, error: error?.message || "خطا در دریافت لیست هزینه‌ها" }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    let context: any = null;
-    try {
-      context = await requirePermission("expenses.create", body.projectId || null);
-    } catch (e: any) {
-      console.warn("requirePermission notice in POST /api/expenses:", e?.message);
-    }
+    const context = await requirePermission("expenses.create", body.projectId || null);
 
     if (!body.title || !body.title.trim()) {
       return NextResponse.json({ success: false, error: "عنوان هزینه الزامی است." }, { status: 400 });
@@ -162,7 +154,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, expense: created, message: "سند هزینه با موفقیت ثبت شد." });
   } catch (error: any) {
     console.error("POST /api/expenses error:", error);
-    return NextResponse.json({ success: false, error: error?.message || "خطا در ثبت هزینه" }, { status: 500 });
+    return apiError(error);
   }
 }
 

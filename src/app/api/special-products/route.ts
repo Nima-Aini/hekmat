@@ -1,18 +1,22 @@
+import { productInput } from "@/services/product";
+import { requirePermission } from "@/services/access";
+import { apiError } from "@/lib/apiError";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { products } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, ne } from "drizzle-orm";
 import { getNextSequenceCode } from "@/services/sequence";
 
 export async function GET(req: NextRequest) {
   try {
+    await requirePermission("products.view");
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q")?.trim();
     const category = searchParams.get("category")?.trim();
     const status = searchParams.get("status")?.trim();
 
     // Query unified products where isSpecial is true
-    let query = db.select().from(products).where(eq(products.isSpecial, true)).orderBy(desc(products.createdAt));
+    let query = db.select().from(products).where(and(eq(products.isSpecial, true), ne(products.status, "archived"))).orderBy(desc(products.createdAt));
 
     const all = await query;
     let filtered = all;
@@ -43,55 +47,21 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("Error fetching special products:", err);
-    return NextResponse.json(
-      { success: false, error: err.message || "خطا در دریافت لیست محصولات اختصاصی" },
-      { status: 500 }
-    );
+    return apiError(err);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await requirePermission("products.create");
     const body = await req.json();
-    const {
-      name,
-      category = "اختصاصی",
-      unit = "عدد",
-      imageUrl,
-      description,
-      basePrice = 0,
-      stockQuantity = 0,
-      minStockQuantity = 0,
-      status = "active",
-      notes,
-    } = body;
-
-    if (!name || !name.trim()) {
-      return NextResponse.json(
-        { success: false, error: "نام محصول اختصاصی الزامی است." },
-        { status: 400 }
-      );
-    }
-
+    const { data } = productInput({ ...body, basePrice: body.basePrice ?? 0, isSpecial: true }, true);
     // Monotonic unique sequential code (SPC-0001)
     const code = await getNextSequenceCode("special_product");
 
     const [inserted] = await db
       .insert(products)
-      .values({
-        code,
-        name: name.trim(),
-        category: category.trim() || "اختصاصی",
-        unit: unit.trim() || "عدد",
-        imageUrl: imageUrl?.trim() || null,
-        description: description?.trim() || null,
-        basePrice: String(Math.max(0, Number(basePrice) || 0)),
-        stockQuantity: String(Math.max(0, Number(stockQuantity) || 0)),
-        minStockQuantity: String(Math.max(0, Number(minStockQuantity) || 0)),
-        status: status === "inactive" ? "inactive" : "active",
-        notes: notes?.trim() || null,
-        isSpecial: true,
-      })
+      .values({ ...data, code, name: data.name!, isSpecial: true })
       .returning();
 
     return NextResponse.json({
@@ -101,9 +71,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("Error creating special product:", err);
-    return NextResponse.json(
-      { success: false, error: err.message || "خطا در ثبت محصول اختصاصی" },
-      { status: 500 }
-    );
+    return apiError(err);
   }
 }

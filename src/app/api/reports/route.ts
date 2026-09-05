@@ -1,3 +1,5 @@
+import { ApiError } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import {
   getDashboardKPIs,
@@ -16,7 +18,10 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type") || "dashboard";
     const projectId = searchParams.get("projectId");
-    await requirePermission("reports.view", projectId);
+    const context = await requirePermission("reports.view", projectId);
+    const globalReports = context.permissions.has("*") || context.roleCode === "manager" || context.permissions.has("financial.view");
+    if (!globalReports && type === "dashboard") throw new ApiError(403, "گزارش شخصی از پنل همکار در دسترس است؛ گزارش مدیریتی نیاز به دسترسی مالی دارد.");
+    if (!globalReports && type !== "sales") throw new ApiError(403, "دسترسی به گزارش مالی سراسری مجاز نیست.");
 
     const startDateStr = searchParams.get("startDate");
     const endDateStr = searchParams.get("endDate");
@@ -45,7 +50,7 @@ export async function GET(req: Request) {
       startDate: parsedStartDate,
       endDate: parsedEndDate,
       customerId: customerId || null,
-      employeeId: employeeId || null,
+      employeeId: globalReports ? employeeId || null : context.employeeId,
     };
 
     if (type === "dashboard") {
@@ -84,6 +89,8 @@ export async function GET(req: Request) {
       if (!projA || !projB) {
         return NextResponse.json({ success: false, error: "انتخاب دو پروژه برای مقایسه الزامی است." }, { status: 400 });
       }
+      await requirePermission("reports.view", projA);
+      await requirePermission("reports.view", projB);
       const data = await getProjectComparisonReport(projA, projB, filter);
       return NextResponse.json({ success: true, data });
     }
@@ -91,7 +98,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, error: "نوع گزارش نامعتبر است." }, { status: 400 });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }
 
@@ -108,6 +115,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: "عملیات نامعتبر" }, { status: 400 });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { employeeAccounts, employees, roles } from "@/db/schema";
@@ -7,7 +8,7 @@ import { verifyPassword, signSession, ensureDefaultAdminAccount } from "@/servic
 export async function POST(req: Request) {
   try {
     const { username, password } = await req.json();
-    if (!username || !password)
+    if (typeof username !== "string" || typeof password !== "string" || !username || !password || username.length > 200 || password.length > 1024)
       return NextResponse.json({ success: false, error: "نام کاربری و رمز عبور الزامی است." }, { status: 400 });
 
     const [row] = await db
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
 
     return response;
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    return apiError(e);
   }
 }
 

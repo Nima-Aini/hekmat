@@ -1,3 +1,5 @@
+import { pageNumber } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { customers, employees, customerProjectMemberships } from "@/db/schema";
@@ -10,8 +12,8 @@ export async function GET(req: Request) {
   try {
     await requirePermission("customers.view");
     const { searchParams } = new URL(req.url);
-    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
+    const page = pageNumber(searchParams.get("page"), 1);
+    const pageSize = pageNumber(searchParams.get("pageSize"), 20, 100);
     const offset = (page - 1) * pageSize;
 
     let list = await db
@@ -44,7 +46,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ success: true, customers: formatted, pagination: { page, pageSize } });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -91,6 +93,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, customer: created });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

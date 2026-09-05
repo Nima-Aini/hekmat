@@ -1,3 +1,4 @@
+import { ApiError, decimal } from "@/lib/apiError";
 import { db } from "@/db";
 import {
   productionBatches,
@@ -25,9 +26,12 @@ export interface CreateProductionBatchInput {
  * Executes a production batch process transactionally.
  */
 export async function executeProductionBatch(input: CreateProductionBatchInput) {
+  decimal(input.quantityToProduce, "مقدار تولید", 4, true);
+  for (const amount of [input.laborCost, input.overheadCost, input.packagingCost]) decimal(amount ?? 0, "هزینه تولید");
   return await db.transaction(async (tx) => {
     const [product] = await tx.select().from(products).where(eq(products.id, input.productId)).limit(1);
-    if (!product) throw new Error("محصول مورد نظر یافت نشد.");
+    if (!product) throw new ApiError(404, "محصول مورد نظر یافت نشد.");
+    if (product.status !== "active") throw new ApiError(409, "محصول غیرفعال قابل تولید نیست.");
 
     const recipes = await tx
       .select({

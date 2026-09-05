@@ -1,7 +1,8 @@
+import { ApiError } from "@/lib/apiError";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import { employeeAccounts, employees, employeeProjectAssignments, roles } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { verifySession } from "@/services/employeeAuth";
 import { employeePermissionSet } from "@/services/partner";
 
@@ -41,16 +42,16 @@ export async function getEmployeeContext(): Promise<EmployeeContext | null> {
 
 export async function getScopedProjectIds() {
   const context = await getEmployeeContext();
-  if (!context) return null;
+  if (!context) throw new ApiError(401, "ابتدا وارد حساب کاربری شوید.");
   if (context.permissions.has("*")) return null;
-  const rows = await db.select({ projectId: employeeProjectAssignments.projectId }).from(employeeProjectAssignments).where(eq(employeeProjectAssignments.employeeId, context.employeeId));
+  const rows = await db.select({ projectId: employeeProjectAssignments.projectId }).from(employeeProjectAssignments).where(and(eq(employeeProjectAssignments.employeeId, context.employeeId), eq(employeeProjectAssignments.status, "active")));
   return rows.map((r) => r.projectId);
 }
 
 export async function requirePermission(permission: string, projectId?: string | null) {
   const context = await getEmployeeContext();
   if (!context) {
-    throw new Error("دسترسی غیرمجاز: لطفاً ابتدا وارد حساب کاربری خود شوید.");
+    throw new ApiError(401, "دسترسی غیرمجاز: لطفاً ابتدا وارد حساب کاربری خود شوید.");
   }
   if (context.permissions.has("*")) {
     return context;
@@ -59,18 +60,18 @@ export async function requirePermission(permission: string, projectId?: string |
     if (!projectId) return context;
     const rows = await db.select().from(employeeProjectAssignments).where(eq(employeeProjectAssignments.employeeId, context.employeeId));
     const matched = rows.find((a) => a.projectId === projectId && a.status === "active");
-    if (!matched) throw new Error("دسترسی شما به این پروژه مجاز نیست.");
+    if (!matched) throw new ApiError(403, "دسترسی شما به این پروژه مجاز نیست.");
     const scoped = (matched.permissionSet || {}) as Record<string, unknown>;
-    if (scoped[permission] === false) throw new Error("دسترسی شما به این عملیات در این پروژه محدود شده است.");
+    if (scoped[permission] === false) throw new ApiError(403, "دسترسی شما به این عملیات در این پروژه محدود شده است.");
     return context;
   }
   if (projectId) {
     const rows = await db.select().from(employeeProjectAssignments).where(eq(employeeProjectAssignments.employeeId, context.employeeId));
     const matched = rows.find((a) => a.projectId === projectId && a.status === "active");
-    if (!matched) throw new Error("دسترسی شما به این پروژه مجاز نیست.");
+    if (!matched) throw new ApiError(403, "دسترسی شما به این پروژه مجاز نیست.");
     const scoped = (matched.permissionSet || {}) as Record<string, unknown>;
     if (scoped[permission] === true) return context;
-    if (scoped[permission] === false) throw new Error("دسترسی شما به این عملیات در این پروژه محدود شده است.");
+    if (scoped[permission] === false) throw new ApiError(403, "دسترسی شما به این عملیات در این پروژه محدود شده است.");
   }
-  throw new Error(`دسترسی موردنیاز برای این عملیات وجود ندارد: ${permission}`);
+  throw new ApiError(403, `دسترسی موردنیاز برای این عملیات وجود ندارد: ${permission}`);
 }

@@ -1,3 +1,5 @@
+import { ApiError, decimal } from "@/lib/apiError";
+import type { Transaction } from "./product";
 import { db } from "@/db";
 import {
   rawMaterials,
@@ -109,8 +111,10 @@ export async function createRawMaterial(input: CreateRawMaterialInput) {
  * Updates a Raw Material and propagates price changes to BOM & product costs.
  * PROMPT REQUIREMENT A: Real edit, save, cancel, validation, refresh, audit & dependent product cost updates.
  */
-export async function updateRawMaterial(id: string, input: UpdateRawMaterialInput) {
-  const [existing] = await db.select().from(rawMaterials).where(eq(rawMaterials.id, id)).limit(1);
+export async function updateRawMaterial(id: string, input: UpdateRawMaterialInput, tx?: Transaction): Promise<typeof rawMaterials.$inferSelect> {
+  if (!tx) return db.transaction(client => updateRawMaterial(id, input, client));
+  if (input.currentCost !== undefined) decimal(input.currentCost, "هزینه");
+  const [existing] = await tx.select().from(rawMaterials).where(eq(rawMaterials.id, id)).for("update").limit(1);
   if (!existing) {
     throw new Error("ماده اولیه پیدا نشد");
   }
@@ -121,7 +125,7 @@ export async function updateRawMaterial(id: string, input: UpdateRawMaterialInpu
     const cleanCode = input.code.trim();
     if (!cleanCode) throw new Error("کد ماده اولیه نمی‌تواند خالی باشد.");
     if (cleanCode !== existing.code) {
-      const [existingCode] = await db
+      const [existingCode] = await tx
         .select({ id: rawMaterials.id })
         .from(rawMaterials)
         .where(eq(rawMaterials.code, cleanCode))
@@ -165,12 +169,12 @@ export async function updateRawMaterial(id: string, input: UpdateRawMaterialInpu
 
   let priceChanged = false;
 
-  if (input.currentCost !== undefined && newCost !== oldCost) {
+  if (input.currentCost !== undefined && (newCost !== oldCost || Number(input.purchaseQuantity) > 0)) {
     priceChanged = true;
     updatePayload.currentCost = newCost.toString();
 
     // Calculate weighted average cost if cost policy is average
-    const currentStock = Number(existing.stockQuantity) || 0;
+    const currentStock = Math.max(0, Number(existing.stockQuantity) - Number(input.purchaseQuantity || 0));
     const oldAvg = Number(existing.averageCost) || oldCost;
     const purchaseQty = input.purchaseQuantity || 0;
     let newAvg: number;
@@ -189,7 +193,7 @@ export async function updateRawMaterial(id: string, input: UpdateRawMaterialInpu
 
     // Save Price History Record
     try {
-      await db.insert(rawMaterialPriceHistory).values({
+      await tx.insert(rawMaterialPriceHistory).values({
         rawMaterialId: id,
         oldCost: oldCost.toFixed(2),
         newCost: newCost.toFixed(2),
@@ -197,11 +201,12 @@ export async function updateRawMaterial(id: string, input: UpdateRawMaterialInpu
         reason: input.priceChangeReason || "ویرایش قیمت دستی",
       });
     } catch (histErr) {
-      console.error("Warning: could not insert raw material update price history:", histErr);
+      console.error("Raw material price history failed:", histErr);
+      throw histErr;
     }
   }
 
-  const [updated] = await db
+  const [updated] = await tx
     .update(rawMaterials)
     .set(updatePayload)
     .where(eq(rawMaterials.id, id))
@@ -209,7 +214,7 @@ export async function updateRawMaterial(id: string, input: UpdateRawMaterialInpu
 
   // If price changed, update costs of all products that use this raw material in BOM
   if (priceChanged) {
-    const affectedRecipes = await db
+    const affectedRecipes = await tx
       .select({ productId: productRecipes.productId })
       .from(productRecipes)
       .where(eq(productRecipes.rawMaterialId, id));
@@ -217,7 +222,7 @@ export async function updateRawMaterial(id: string, input: UpdateRawMaterialInpu
     const affectedProductIds = Array.from(new Set(affectedRecipes.map((r) => r.productId)));
 
     for (const prodId of affectedProductIds) {
-      await updateProductCostFromBOM(prodId);
+      await updateProductCostFromBOM(prodId, tx);
     }
   }
 
@@ -226,7 +231,7 @@ export async function updateRawMaterial(id: string, input: UpdateRawMaterialInpu
     newCost,
     priceChanged,
     updatedFields: Object.keys(updatePayload),
-  });
+  }, undefined, tx);
 
   return updated;
 }

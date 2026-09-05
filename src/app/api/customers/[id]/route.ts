@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { customers, invoices, payments, customerHealthLogs, employees } from "@/db/schema";
@@ -10,6 +12,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const context = await requirePermission("customers.view");
     const { id } = await params;
+    assertUuid(id);
 
     const [customer] = await db
       .select({
@@ -63,7 +66,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       healthLogs,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -71,6 +74,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const context = await requirePermission("customers.update");
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
     const [owned] = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
     if (!owned) return NextResponse.json({ success: false, error: "مشتری یافت نشد" }, { status: 404 });
@@ -116,6 +120,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
     return NextResponse.json({ success: true, customer: updated });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

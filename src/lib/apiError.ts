@@ -1,0 +1,33 @@
+import { NextResponse } from "next/server";
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+export function apiError(error: unknown) {
+  if (error instanceof ApiError) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+  // Keep SQL, parameters and internal messages out of HTTP responses.
+  console.error("API operation failed:", error);
+  const cause = error instanceof Error && error.cause ? error.cause : error;
+  const code = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined;
+  const status = code === "23505" || code === "23503" ? 409 : error instanceof SyntaxError || code === "22P02" || code === "22003" ? 400 : 500;
+  const message = code === "23505" ? "اطلاعات تکراری است؛ کد یا شماره دیگری انتخاب کنید." : code === "23503" ? "این عملیات با اطلاعات مرتبط سازگار نیست؛ اطلاعات را تازه‌سازی کنید." : status === 400 ? "اطلاعات ارسالی معتبر نیست." : "خطا در انجام عملیات؛ لطفاً دوباره تلاش کنید.";
+  return NextResponse.json({ success: false, error: message }, { status });
+}
+
+export function assertUuid(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new ApiError(400, "شناسه ارسالی معتبر نیست.");
+}
+
+export function decimal(value: unknown, label: string, scale = 2, positive = false): string {
+  if ((typeof value !== "number" && typeof value !== "string") || String(value).trim() === "") throw new ApiError(400, `${label} معتبر نیست.`);
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || (positive && n === 0) || n >= 10 ** (15 - scale)) throw new ApiError(400, `${label} معتبر نیست.`);
+  return n.toFixed(scale);
+}
+
+export function pageNumber(value: string | null, fallback: number, max = 1000000) {
+  if (value === null) return fallback;
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) throw new ApiError(400, "شماره صفحه معتبر نیست.");
+  return Math.min(Number(value), max);
+}

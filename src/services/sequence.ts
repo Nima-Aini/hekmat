@@ -43,8 +43,8 @@ export async function getNextSequenceCode(type: SequenceType): Promise<string> {
           }
         }
       } else {
-        const existingSp = await db.select({ code: specialProducts.code }).from(specialProducts).catch(() => []);
-        const existingPrdSp = await db.select({ code: products.code }).from(products).where(eq(products.isSpecial, true)).catch(() => []);
+        const existingSp = await db.select({ code: specialProducts.code }).from(specialProducts);
+        const existingPrdSp = await db.select({ code: products.code }).from(products).where(eq(products.isSpecial, true));
         const existing = [...existingSp, ...existingPrdSp];
         for (const item of existing) {
           const match = item.code.match(/SPC-(\d+)/i);
@@ -72,8 +72,6 @@ export async function getNextSequenceCode(type: SequenceType): Promise<string> {
     return `${prefix}${padded}`;
   } catch (err) {
     console.error(`Error generating sequence code for ${type}:`, err);
-    // Fallback in case of temporary DB lock/issue
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    return `${prefix}${randomSuffix}`;
+    throw err;
   }
 }

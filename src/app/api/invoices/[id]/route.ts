@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { invoices, invoiceItems, customers, projects, employees, products, payments } from "@/db/schema";
@@ -9,6 +11,7 @@ import { logAuditEvent } from "@/services/audit";
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     const context = await requirePermission("invoices.view");
 
     const [inv] = await db
@@ -32,8 +35,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       return NextResponse.json({ success: false, error: "فاکتور یافت نشد" }, { status: 404 });
     }
 
-    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage") || context.permissions.has("invoices.view");
-    if (!isManagerOrAdmin && context && inv.invoice.employeeId && inv.invoice.employeeId !== context.employeeId) {
+    await requirePermission("invoices.view", inv.invoice.projectId);
+    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage");
+    if (!isManagerOrAdmin && context && inv.invoice.employeeId !== context.employeeId) {
       return NextResponse.json({ success: false, error: "دسترسی به این فاکتور مجاز نیست" }, { status: 403 });
     }
 
@@ -79,20 +83,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       payments: invoicePayments,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
-    const context = await requirePermission("invoices.update");
+    const context = await requirePermission("invoices.reverse");
     const [existing] = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
     if (!existing) return NextResponse.json({ success: false, error: "فاکتور یافت نشد" }, { status: 404 });
 
-    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage") || context.permissions.has("invoices.update");
-    if (!isManagerOrAdmin && context && existing.employeeId && existing.employeeId !== context.employeeId) {
+    await requirePermission("invoices.reverse", existing.projectId);
+    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage");
+    if (!isManagerOrAdmin && context && existing.employeeId !== context.employeeId) {
       return NextResponse.json({ success: false, error: "دسترسی به این فاکتور مجاز نیست" }, { status: 403 });
     }
 
@@ -103,23 +109,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     return NextResponse.json({ success: false, error: "عملیات نامعتبر" }, { status: 400 });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
     const context = await requirePermission("invoices.update", body.projectId || null);
     const [existing] = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
     if (!existing) return NextResponse.json({ success: false, error: "فاکتور یافت نشد" }, { status: 404 });
 
-    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage") || context.permissions.has("invoices.update");
-    if (!isManagerOrAdmin && context && existing.employeeId && existing.employeeId !== context.employeeId) {
+    await requirePermission("invoices.update", existing.projectId);
+    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage");
+    if (!isManagerOrAdmin && context && existing.employeeId !== context.employeeId) {
       return NextResponse.json({ success: false, error: "دسترسی به ویرایش این فاکتور مجاز نیست" }, { status: 403 });
     }
 
+    if (!isManagerOrAdmin && ((body.employeeId !== undefined && body.employeeId !== existing.employeeId) || (body.customerId !== undefined && body.customerId !== existing.customerId) || (body.projectId !== undefined && body.projectId !== existing.projectId))) return NextResponse.json({ success: false, error: "تغییر مالکیت فاکتور مجاز نیست." }, { status: 403 });
     const updated = await updateInvoice(id, {
       customerId: body.customerId,
       employeeId: body.employeeId !== undefined ? (body.employeeId || null) : undefined,
@@ -135,25 +144,27 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
     return NextResponse.json({ success: true, invoice: updated });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     const context = await requirePermission("invoices.delete");
     const [existing] = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
     if (!existing) return NextResponse.json({ success: false, error: "فاکتور یافت نشد" }, { status: 404 });
 
-    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage") || context.permissions.has("invoices.delete");
-    if (!isManagerOrAdmin && context && existing.employeeId && existing.employeeId !== context.employeeId) {
+    await requirePermission("invoices.delete", existing.projectId);
+    const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage");
+    if (!isManagerOrAdmin && context && existing.employeeId !== context.employeeId) {
       return NextResponse.json({ success: false, error: "دسترسی به حذف این فاکتور مجاز نیست" }, { status: 403 });
     }
 
     const result = await deleteInvoice(id, "حذف مستقیم فاکتور");
     return NextResponse.json({ success: true, message: result.message });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

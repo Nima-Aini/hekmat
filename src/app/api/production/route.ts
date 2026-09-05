@@ -1,3 +1,5 @@
+import { requirePermission } from "@/services/access";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { productionBatches, products, projects } from "@/db/schema";
@@ -6,6 +8,7 @@ import { executeProductionBatch } from "@/services/production";
 
 export async function GET() {
   try {
+    await requirePermission("production.view");
     const list = await db
       .select({
         batch: productionBatches,
@@ -28,12 +31,13 @@ export async function GET() {
 
     return NextResponse.json({ success: true, batches: formatted });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function POST(req: Request) {
   try {
+    await requirePermission("production.create");
     const body = await req.json();
 
     if (!body.productId || !body.quantityToProduce) {
@@ -56,6 +60,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, batch: created });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

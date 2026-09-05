@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { employeeProjectAssignments, employees, permissions, roles, rolePermissions, projects, employeeAccounts } from "@/db/schema";
@@ -8,6 +10,7 @@ import { logAuditEvent } from "@/services/audit";
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     await requirePermission("employees.manage");
     const [employee] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
     if (!employee) return NextResponse.json({ success: false, error: "همکار پیدا نشد" }, { status: 404 });
@@ -17,13 +20,14 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const allRoles = await db.select().from(roles).orderBy(asc(roles.code));
     return NextResponse.json({ success: true, employee, account: account || null, projects: rows, permissions: allPermissions, roles: allRoles });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 403 });
+    return apiError(e);
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     await requirePermission("employees.manage");
     const body = await req.json();
     if (!body.projectId) return NextResponse.json({ success: false, error: "پروژه الزامی است" }, { status: 400 });
@@ -33,6 +37,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     await logAuditEvent("PERMISSION_CHANGE", "employee", id, { projectId: body.projectId, before, after: row });
     return NextResponse.json({ success: true, assignment: row });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 403 });
+    return apiError(e);
   }
 }

@@ -1,7 +1,10 @@
+import { recordInventoryTransaction } from "@/services/inventory";
+import { apiError, ApiError, assertUuid, decimal } from "@/lib/apiError";
+import { productInput } from "@/services/product";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, productRecipes, rawMaterials, projectProductPrices } from "@/db/schema";
-import { desc, eq, and } from "drizzle-orm";
+import { desc, eq, and, ne } from "drizzle-orm";
 import { updateProductCostFromBOM } from "@/services/pricing";
 import { logAuditEvent } from "@/services/audit";
 import { requirePermission } from "@/services/access";
@@ -13,7 +16,8 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get("projectId");
 
-    const list = await db.select().from(products).orderBy(desc(products.createdAt));
+    if (projectId) assertUuid(projectId);
+    const list = await db.select().from(products).where(ne(products.status, "archived")).orderBy(desc(products.createdAt));
 
     let projectPricesMap = new Map<string, number>();
     if (projectId) {
@@ -47,14 +51,14 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ success: true, products: formatted });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    await requirePermission(body?.action === "update_project_price" ? "projects.price.manage" : "products.create");
+    await requirePermission(body?.action === "update_project_price" ? "projects.price.manage" : body?.action === "adjust_stock" ? "products.update" : "products.create", body?.action === "update_project_price" ? body.projectId : undefined);
 
     // Handle stock adjustment
     if (body.action === "adjust_stock") {
@@ -63,24 +67,13 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: "شناسه محصول و مقدار موجودی الزامی است." }, { status: 400 });
       }
 
-      const [prod] = await db.select().from(products).where(eq(products.id, productId)).limit(1);
-      if (!prod) return NextResponse.json({ success: false, error: "محصول یافت نشد." }, { status: 404 });
-
-      const currentStock = Number(prod.stockQuantity) || 0;
-      const targetStock = Number(newQuantity) || 0;
-      const diff = targetStock - currentStock;
-
-      const [updated] = await db
-        .update(products)
-        .set({ stockQuantity: targetStock.toString(), updatedAt: new Date() })
-        .where(eq(products.id, productId))
-        .returning();
-
-      await logAuditEvent("ADJUST_STOCK", "product", productId, {
-        previousStock: currentStock,
-        newStock: targetStock,
-        diff,
-        reason: reason || "تعدیل دستی انبار",
+      assertUuid(productId);
+      decimal(newQuantity, "موجودی", 4);
+      const updated = await db.transaction(async (tx) => {
+        const [prod] = await tx.select().from(products).where(eq(products.id, productId)).for("update").limit(1);
+        if (!prod) throw new ApiError(404, "محصول یافت نشد.");
+        await recordInventoryTransaction({ itemId: productId, itemType: "product", transactionType: "adjustment", quantityChange: Number(newQuantity) - Number(prod.stockQuantity), notes: typeof reason === "string" ? reason : "تعدیل دستی انبار" }, tx);
+        return (await tx.select().from(products).where(eq(products.id, productId)))[0];
       });
 
       return NextResponse.json({ success: true, product: updated });
@@ -96,89 +89,31 @@ export async function POST(req: Request) {
         );
       }
 
-      // Strictly check existing project price on BOTH projectId AND productId
-      const [existing] = await db
-        .select()
-        .from(projectProductPrices)
-        .where(
-          and(
-            eq(projectProductPrices.projectId, projectId),
-            eq(projectProductPrices.productId, productId)
-          )
-        )
-        .limit(1);
-
-      if (existing) {
-        await db
-          .update(projectProductPrices)
-          .set({
-            customPrice: customPrice.toString(),
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(projectProductPrices.projectId, projectId),
-              eq(projectProductPrices.productId, productId)
-            )
-          );
-      } else {
-        await db.insert(projectProductPrices).values({
-          projectId,
-          productId,
-          customPrice: customPrice.toString(),
-        });
-      }
+      assertUuid(projectId);
+      assertUuid(productId);
+      const price = decimal(customPrice, "قیمت پروژه");
+      await db.insert(projectProductPrices).values({ projectId, productId, customPrice: price })
+        .onConflictDoUpdate({ target: [projectProductPrices.projectId, projectProductPrices.productId], set: { customPrice: price, updatedAt: new Date() } });
 
       await logAuditEvent("UPDATE_PROJECT_PRICE", "product", productId, { projectId, customPrice });
       return NextResponse.json({ success: true, message: "قیمت پروژه با موفقیت به روز شد." });
     }
 
-    if (!body.name || body.basePrice === undefined) {
-      return NextResponse.json(
-        { success: false, error: "نام و قیمت پایه محصول الزامی است." },
-        { status: 400 }
-      );
-    }
-
-    let code = body.code?.trim();
-    if (!code) {
-      code = await getNextSequenceCode(body.isSpecial ? "special_product" : "product");
-    }
-
-    const [created] = await db
-      .insert(products)
-      .values({
-        code,
-        name: body.name.trim(),
-        category: body.category || (body.isSpecial ? "اختصاصی" : "عمومی"),
-        unit: body.unit || "عدد",
-        imageUrl: body.imageUrl?.trim() || null,
-        description: body.description?.trim() || null,
-        basePrice: Math.max(0, Number(body.basePrice) || 0).toString(),
-        calculatedCost: body.calculatedCost ? body.calculatedCost.toString() : "0",
-        stockQuantity: body.stockQuantity ? Math.max(0, Number(body.stockQuantity) || 0).toString() : "0",
-        minStockQuantity: body.minStockQuantity ? Math.max(0, Number(body.minStockQuantity) || 0).toString() : "5",
-        status: body.status || "active",
-        isSpecial: !!body.isSpecial,
-      })
-      .returning();
-
-    // If BOM recipes provided, save recipes
-    if (body.recipes && Array.isArray(body.recipes)) {
-      for (const recipe of body.recipes) {
-        await db.insert(productRecipes).values({
-          productId: created.id,
-          rawMaterialId: recipe.rawMaterialId,
-          quantityRequired: recipe.quantityRequired.toString(),
-          wastagePercent: recipe.wastagePercent ? recipe.wastagePercent.toString() : "0",
-        });
+    if (body.action) throw new ApiError(400, "عملیات نامعتبر است.");
+    const { data, recipes } = productInput(body, true);
+    const code = data.code || await getNextSequenceCode(data.isSpecial ? "special_product" : "product");
+    const created = await db.transaction(async (tx) => {
+      const [product] = await tx.insert(products).values({ ...data, code, name: data.name!, basePrice: data.basePrice! }).returning();
+      if (recipes !== undefined) {
+        if (recipes.length) await tx.insert(productRecipes).values(recipes.map(r => ({ ...r, productId: product.id })));
+        await updateProductCostFromBOM(product.id, tx);
       }
-      await updateProductCostFromBOM(created.id);
-    }
+      return (await tx.select().from(products).where(eq(products.id, product.id)))[0];
+    });
 
     await logAuditEvent("CREATE", "product", created.id, { name: created.name, code: created.code });
-    return NextResponse.json({ success: true, product: created });
+    return NextResponse.json({ success: true, product: created }, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

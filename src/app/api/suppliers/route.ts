@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { suppliers } from "@/db/schema";
@@ -11,7 +12,7 @@ export async function GET() {
     const list = await db.select().from(suppliers).orderBy(desc(suppliers.createdAt));
     return NextResponse.json({ success: true, suppliers: list });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -42,6 +43,6 @@ export async function POST(req: Request) {
     await logAuditEvent("CREATE", "supplier", created.id, { name: created.name });
     return NextResponse.json({ success: true, supplier: created });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

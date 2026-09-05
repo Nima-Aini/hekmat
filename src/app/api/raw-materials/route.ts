@@ -1,3 +1,5 @@
+import { requirePermission } from "@/services/access";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { rawMaterials, suppliers } from "@/db/schema";
@@ -6,6 +8,7 @@ import { createRawMaterial, updateRawMaterial, adjustRawMaterialStock, deleteRaw
 
 export async function GET() {
   try {
+    await requirePermission("raw_materials.view");
     const list = await db
       .select({
         rawMaterial: rawMaterials,
@@ -27,13 +30,14 @@ export async function GET() {
 
     return NextResponse.json({ success: true, rawMaterials: formatted });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    await requirePermission(body.action === "adjust_stock" ? "raw_materials.update" : "raw_materials.create");
 
     if (body.action === "adjust_stock") {
       const adjusted = await adjustRawMaterialStock(
@@ -67,12 +71,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, rawMaterial: created });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    return apiError(error);
   }
 }
 
 export async function DELETE(req: Request) {
   try {
+    await requirePermission("raw_materials.update");
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (!id) {
@@ -81,6 +86,6 @@ export async function DELETE(req: Request) {
     const result = await deleteRawMaterial(id);
     return NextResponse.json({ success: true, message: `ماده اولیه "${result.deletedName}" با موفقیت حذف شد.` });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    return apiError(error);
   }
 }
