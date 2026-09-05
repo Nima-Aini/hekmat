@@ -388,7 +388,7 @@ export const RawMaterialsView: React.FC = () => {
 
       {/* Table Data */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="responsive-table overflow-x-auto">
           <table className="w-full text-right text-xs text-slate-300">
             <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
               <tr>
@@ -499,7 +499,7 @@ export const RawMaterialsView: React.FC = () => {
 
       {/* Add Modal */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -657,7 +657,7 @@ export const RawMaterialsView: React.FC = () => {
 
       {/* Edit Modal */}
       {editingMaterial && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -804,7 +804,7 @@ export const RawMaterialsView: React.FC = () => {
 
       {/* Delete Confirmation Modal */}
       {deletingMaterial && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-rose-500/30 bg-slate-900 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-rose-400 flex items-center gap-2">
@@ -865,7 +865,7 @@ export const RawMaterialsView: React.FC = () => {
 
       {/* Stock Adjustment Modal */}
       {adjustingMaterial && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -932,7 +932,7 @@ export const RawMaterialsView: React.FC = () => {
 
       {/* History Drawer */}
       {viewingHistoryMaterial && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
+        <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
           <div className="h-full w-full max-w-md bg-slate-900 border-r border-slate-800 p-6 shadow-2xl overflow-y-auto space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">

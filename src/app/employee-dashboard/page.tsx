@@ -633,7 +633,7 @@ export default function EmployeeDashboardPage() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="responsive-table overflow-x-auto">
                 <table className="w-full text-xs text-slate-300 text-right">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
@@ -742,7 +742,7 @@ export default function EmployeeDashboardPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="responsive-table overflow-x-auto">
               <table className="w-full text-xs text-slate-300 text-right">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
@@ -829,7 +829,7 @@ export default function EmployeeDashboardPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="responsive-table overflow-x-auto">
               <table className="w-full text-xs text-slate-300 text-right">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
@@ -923,7 +923,7 @@ export default function EmployeeDashboardPage() {
               </button>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="responsive-table overflow-x-auto">
               <table className="w-full text-xs text-slate-300 text-right">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
@@ -1009,7 +1009,9 @@ export default function EmployeeDashboardPage() {
       {/* MODAL: ADD/EDIT CUSTOMER */}
       {showCustomer && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowCustomer(false);
           }}
@@ -1165,7 +1167,9 @@ export default function EmployeeDashboardPage() {
       {/* MODAL: NEW INVOICE */}
       {showInvoice && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 overflow-y-auto p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 bg-black/80 overflow-y-auto p-4 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowInvoice(false);
           }}
@@ -1369,7 +1373,9 @@ export default function EmployeeDashboardPage() {
       {/* MODAL: EDIT INVOICE */}
       {editInvoice && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) setEditInvoice(null);
           }}
@@ -1445,7 +1451,9 @@ export default function EmployeeDashboardPage() {
       {/* MODAL: NEW PAYMENT (Accountant) */}
       {showPayment && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowPayment(false);
           }}

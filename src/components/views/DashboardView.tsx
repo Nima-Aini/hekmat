@@ -93,11 +93,11 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
   }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Alert Header Banner if active alerts exist */}
       {alerts.length > 0 && (
-        <div className="flex items-center justify-between rounded-2xl border border-rose-500/30 bg-rose-950/20 p-4 backdrop-blur-md">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 rounded-2xl border border-rose-500/30 bg-rose-950/20 p-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
             <AlertTriangle className="h-5 w-5 text-rose-400 animate-pulse" />
             <div>
               <p className="text-sm font-semibold text-rose-200">
@@ -110,7 +110,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
           </div>
           <button
             onClick={() => onNavigate("alerts")}
-            className="rounded-xl bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg shadow-rose-600/30 hover:bg-rose-500 transition-all"
+            className="w-full rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-semibold text-white shadow-lg shadow-rose-600/30 transition-all hover:bg-rose-500 sm:w-auto sm:py-1.5"
           >
             مشاهده هشدارها
           </button>
@@ -120,7 +120,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
       {/* Executive KPI Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Total Sales */}
-        <div className="group rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-blue-500/40">
+        <div className="mobile-compact-card group min-w-0 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-blue-500/40">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400">فروش کل (درآمد)</span>
             <div className="rounded-xl bg-blue-500/10 p-2 text-blue-400">
@@ -128,7 +128,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
             </div>
           </div>
           <div className="mt-3 flex items-baseline justify-between">
-            <h3 className="text-2xl font-bold tracking-tight text-white">
+            <h3 className="kpi-value min-w-0 break-words font-bold tracking-tight text-white">
               {kpis.totalSales.toLocaleString("fa-IR")}{" "}
               <span className="text-xs font-normal text-slate-400">تومان</span>
             </h3>
@@ -142,7 +142,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
         </div>
 
         {/* Real Gross Profit */}
-        <div className="group rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-emerald-500/40">
+        <div className="mobile-compact-card group min-w-0 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-emerald-500/40">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400">سود ناخالص (واقعی)</span>
             <div className="rounded-xl bg-emerald-500/10 p-2 text-emerald-400">
@@ -150,7 +150,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
             </div>
           </div>
           <div className="mt-3 flex items-baseline justify-between">
-            <h3 className={`text-2xl font-bold tracking-tight ${kpis.totalGrossProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            <h3 className={`kpi-value min-w-0 break-words font-bold tracking-tight ${kpis.totalGrossProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
               {kpis.totalGrossProfit.toLocaleString("fa-IR")}{" "}
               <span className="text-xs font-normal text-slate-400">تومان</span>
             </h3>
@@ -164,7 +164,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
         </div>
 
         {/* Net Profit */}
-        <div className="group rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-purple-500/40">
+        <div className="mobile-compact-card group min-w-0 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-purple-500/40">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400">سود خالص نهایی</span>
             <div className="rounded-xl bg-purple-500/10 p-2 text-purple-400">
@@ -172,7 +172,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
             </div>
           </div>
           <div className="mt-3 flex items-baseline justify-between">
-            <h3 className={`text-2xl font-bold tracking-tight ${kpis.netProfit >= 0 ? "text-purple-300" : "text-rose-400"}`}>
+            <h3 className={`kpi-value min-w-0 break-words font-bold tracking-tight ${kpis.netProfit >= 0 ? "text-purple-300" : "text-rose-400"}`}>
               {kpis.netProfit.toLocaleString("fa-IR")}{" "}
               <span className="text-xs font-normal text-slate-400">تومان</span>
             </h3>
@@ -186,7 +186,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
         </div>
 
         {/* Liquidity & Receivables */}
-        <div className="group rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-amber-500/40">
+        <div className="mobile-compact-card group min-w-0 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl transition-all duration-200 hover:border-amber-500/40">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-400">مطالبات و نقدینگی</span>
             <div className="rounded-xl bg-amber-500/10 p-2 text-amber-400">
@@ -214,8 +214,8 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
 
       {/* Main Sales & Profit Trend Chart */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
+        <div className="mobile-compact-card rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl lg:col-span-2">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-white">روند فروش و سود در طول زمان</h3>
               <p className="text-xs text-slate-400">نمودار زمانی بر اساس فاکتورهای صادر شده واقعی سیستم</p>
@@ -258,7 +258,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
 
         {/* Customer Health Breakdown & Quick Actions */}
         <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl">
+          <div className="mobile-compact-card rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl">
             <h3 className="text-base font-bold text-white mb-1">وضعیت سلامت مشتریان</h3>
             <p className="text-xs text-slate-400 mb-4">تحلیل خودکار رفتار خرید، سررسید و سودآوری مشتریان</p>
 

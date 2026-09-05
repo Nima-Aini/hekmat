@@ -10,10 +10,172 @@
     direction: rtl;
     background-color: #020617;
     color: #f8fafc;
+    max-width: 100%;
+  }
+
+  html {
+    overflow-x: clip;
+  }
+
+  body {
+    min-width: 320px;
+  }
+
+  img, video, canvas, svg {
+    max-width: 100%;
+  }
+
+  main, section, article, form, fieldset,
+  .app-shell, .app-shell > *, .app-main,
+  .app-main > *, .app-main .flex-1,
+  .app-main [class*="grid"] > * {
+    min-width: 0;
   }
 
   input, button, select, textarea, optgroup, option {
     font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  }
+}
+
+/* Shared responsive primitives used by every dashboard view. */
+.responsive-table {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-modal {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+body:has(.app-modal) {
+  overflow: hidden;
+}
+
+.kpi-value {
+  font-size: clamp(1.15rem, 5.5vw, 1.5rem);
+  line-height: 1.5;
+}
+
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+    font-size: 16px !important;
+  }
+
+  .app-main > [class*="space-y-6"] {
+    row-gap: 1rem;
+  }
+
+  .app-main h2.text-xl {
+    font-size: 1.05rem;
+    line-height: 1.75rem;
+  }
+
+  .app-main [class~="p-8"],
+  .app-main [class~="p-7"],
+  .app-main [class~="p-6"] {
+    padding: 1rem;
+  }
+
+  .app-main [class~="gap-8"],
+  .app-main [class~="gap-7"],
+  .app-main [class~="gap-6"] {
+    gap: 1rem;
+  }
+
+  .app-main button,
+  .app-main a {
+    max-width: 100%;
+  }
+
+  .app-main .flex[class~="justify-between"] {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .app-main .font-mono[class~="text-2xl"],
+  .app-main .font-mono[class~="text-3xl"],
+  .app-main .font-mono[class~="text-4xl"] {
+    overflow-wrap: anywhere;
+    font-size: clamp(1.1rem, 5.5vw, 1.5rem);
+    line-height: 1.5;
+  }
+
+  .app-main .mobile-compact-card {
+    padding: 1rem;
+  }
+
+  .responsive-table > table,
+  .app-main .overflow-x-auto > table {
+    min-width: 44rem;
+  }
+
+  .app-modal {
+    align-items: flex-start !important;
+    overflow-y: auto;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  .app-modal > div {
+    width: calc(100vw - 1.5rem) !important;
+    max-width: calc(100vw - 1.5rem) !important;
+    max-height: calc(100dvh - max(1.5rem, env(safe-area-inset-top) + env(safe-area-inset-bottom))) !important;
+    margin: 0 auto !important;
+    overflow-x: clip;
+    overflow-y: auto;
+    padding: 1rem !important;
+    border-radius: 1rem !important;
+  }
+
+  .invoice-preview-modal > div {
+    overflow-x: auto;
+  }
+
+  .invoice-preview-modal #persian-official-invoice {
+    min-width: 44rem;
+  }
+
+  .app-modal form [class~="grid-cols-2"],
+  .app-modal form [class~="grid-cols-3"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-modal form > div:last-child:has(button) {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-inline: -1rem;
+    margin-bottom: -1rem;
+    padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom));
+    background: rgb(2 6 23 / 0.96);
+    backdrop-filter: blur(10px);
+  }
+}
+
+@media (min-width: 640px) {
+  .desktop-table-only {
+    display: block;
+  }
+
+  .mobile-card-list {
+    display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .desktop-table-only {
+    display: none;
+  }
+
+  .mobile-card-list {
+    display: grid;
   }
 }
 
@@ -45,6 +207,7 @@
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
+    overflow: visible !important;
   }
 
   /* Hide entire application shell and modal chrome */
@@ -92,4 +255,3 @@
     margin: 6mm;
   }
 }
-

@@ -209,7 +209,7 @@ export const InventoryView: React.FC = () => {
       {/* Tab 1: Ledger */}
       {activeTab === "ledger" && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="responsive-table overflow-x-auto">
             <table className="w-full text-right text-xs text-slate-300">
               <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                 <tr>
@@ -298,7 +298,7 @@ export const InventoryView: React.FC = () => {
       {/* Tab 2: Materials */}
       {activeTab === "materials" && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="responsive-table overflow-x-auto">
             <table className="w-full text-right text-xs text-slate-300">
               <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                 <tr>
@@ -348,7 +348,7 @@ export const InventoryView: React.FC = () => {
       {/* Tab 3: Products */}
       {activeTab === "products" && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="responsive-table overflow-x-auto">
             <table className="w-full text-right text-xs text-slate-300">
               <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                 <tr>

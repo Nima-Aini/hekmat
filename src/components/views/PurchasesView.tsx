@@ -388,7 +388,7 @@ export const PurchasesView: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="responsive-table overflow-x-auto">
               <table className="w-full text-right text-xs text-slate-300">
                 <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                   <tr>
@@ -546,7 +546,9 @@ export const PurchasesView: React.FC = () => {
       {/* Modal 1: Register Purchase Invoice */}
       {isPurchaseModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsPurchaseModalOpen(false);
           }}
@@ -727,7 +729,9 @@ export const PurchasesView: React.FC = () => {
       {/* Modal 2: Add / Edit Supplier */}
       {isSupplierModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsSupplierModalOpen(false);
           }}

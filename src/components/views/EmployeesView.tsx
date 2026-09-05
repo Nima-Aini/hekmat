@@ -596,7 +596,9 @@ export const EmployeesView: React.FC = () => {
       {/* Employee Detail Modal */}
       {selected && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 md:p-6 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 md:p-6 overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setSelected(null);
           }}
@@ -749,7 +751,7 @@ export const EmployeesView: React.FC = () => {
                     </button>
                   )}
                 </div>
-                <div className="overflow-auto rounded-2xl border border-slate-800">
+                <div className="responsive-table overflow-auto rounded-2xl border border-slate-800">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-slate-400 bg-slate-900 border-b border-slate-800">
@@ -800,7 +802,7 @@ export const EmployeesView: React.FC = () => {
             )}
 
             {tab === "sales" && (
-              <div className="overflow-auto rounded-2xl border border-slate-800">
+              <div className="responsive-table overflow-auto rounded-2xl border border-slate-800">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-slate-400 bg-slate-900 border-b border-slate-800">
@@ -890,7 +892,7 @@ export const EmployeesView: React.FC = () => {
                 </div>
 
                 {/* Commissions & Payouts Ledger Table */}
-                <div className="overflow-auto rounded-2xl border border-slate-800">
+                <div className="responsive-table overflow-auto rounded-2xl border border-slate-800">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-slate-400 bg-slate-900 border-b border-slate-800">
@@ -1363,7 +1365,9 @@ export const EmployeesView: React.FC = () => {
       {/* Modal: Create Employee */}
       {showCreate && (
         <div
-          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowCreate(false);
           }}
@@ -1565,7 +1569,9 @@ export const EmployeesView: React.FC = () => {
       {/* Modal: Account & Password */}
       {showAccount && (
         <div
-          className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowAccount(false);
           }}
@@ -1631,7 +1637,9 @@ export const EmployeesView: React.FC = () => {
       {/* Modal: Edit Employee */}
       {showEdit && (
         <div
-          className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowEdit(false);
           }}
@@ -1796,7 +1804,9 @@ export const EmployeesView: React.FC = () => {
       {/* Modal: Transfer Customers */}
       {showTransfer && (
         <div
-          className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowTransfer(false);
           }}
@@ -1861,7 +1871,9 @@ export const EmployeesView: React.FC = () => {
       {/* Modal: Commission Payout */}
       {showPayoutModal && selected && (
         <div
-          className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowPayoutModal(false);
           }}

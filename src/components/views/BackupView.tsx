@@ -183,7 +183,7 @@ export const BackupView: React.FC = () => {
 
       {/* File Upload Confirmation Modal */}
       {restoreFile && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="max-w-md w-full rounded-2xl bg-slate-950 border border-red-500/40 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-amber-400">
               <AlertTriangle className="h-6 w-6" />
@@ -220,7 +220,7 @@ export const BackupView: React.FC = () => {
 
       {/* Backup Item Restore Confirmation Modal */}
       {selectedBackupForRestore && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="max-w-md w-full rounded-2xl bg-slate-950 border border-amber-500/40 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-amber-400">
               <AlertTriangle className="h-6 w-6" />
@@ -255,7 +255,7 @@ export const BackupView: React.FC = () => {
       {/* Backups List Table */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl overflow-hidden p-5 space-y-3">
         <h3 className="text-sm font-bold text-white">لیست فایل‌های پشتیبان ثبت‌شده در سیستم</h3>
-        <div className="overflow-x-auto">
+        <div className="responsive-table overflow-x-auto">
           <table className="w-full text-right text-xs text-slate-300">
             <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
               <tr>

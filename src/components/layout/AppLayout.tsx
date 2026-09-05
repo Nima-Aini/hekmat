@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { NeonBadge } from "@/components/ui/NeonBadge";
 import {
   LayoutDashboard,
@@ -47,6 +47,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 }) => {
   const [projects, setProjects] = useState<any[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -72,6 +74,23 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       window.removeEventListener("focus", handleUpdate);
     };
   }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    sidebarRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [sidebarOpen]);
 
   const handleSearch = async (val: string) => {
     setSearchQuery(val);
@@ -124,26 +143,46 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const visibleNavItems = navItems.filter((item) => canSee(item.id));
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans dir-rtl flex flex-col antialiased">
+    <div className="app-shell min-h-screen min-w-0 bg-slate-950 text-slate-100 font-sans dir-rtl flex flex-col antialiased">
       {/* Top Header */}
-      <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-800 bg-slate-950/80 px-4 backdrop-blur-md sm:px-6">
-        <div className="flex items-center gap-4">
+      <header className="app-header sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur-md sm:px-6 md:grid md:grid-cols-2 md:gap-x-3 lg:flex lg:h-16 lg:items-center lg:justify-between lg:py-0">
+        <div className="flex min-w-0 items-center justify-between gap-2 md:col-span-2 lg:contents">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:bg-slate-900 hover:text-white lg:hidden"
+            className="shrink-0 rounded-xl border border-slate-800 p-2 text-slate-400 hover:bg-slate-900 hover:text-white lg:hidden"
+            aria-label="باز کردن منوی اصلی"
+            aria-expanded={sidebarOpen}
           >
             <Menu className="h-5 w-5" />
           </button>
 
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 font-bold text-white shadow-lg shadow-blue-500/20">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 text-xs font-bold text-white shadow-lg shadow-blue-500/20 sm:text-sm">
               آکما
             </div>
-            <div>
-              <h1 className="text-sm font-extrabold tracking-tight text-white">سیستم عملیاتی حکمت آکما</h1>
-              <p className="text-[10px] text-slate-400">نسخه ۲.۰ - سیستم مدیریت و حسابداری یکپارچه</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-xs font-extrabold tracking-tight text-white sm:text-sm">سیستم عملیاتی حکمت آکما</h1>
+              <p className="hidden text-[10px] text-slate-400 xl:block">نسخه ۲.۰ - سیستم مدیریت و حسابداری یکپارچه</p>
             </div>
           </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5 lg:order-last lg:mr-3 lg:gap-2">
+          <button
+            onClick={() => setMobileSearchOpen((open) => !open)}
+            className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:bg-slate-900 hover:text-white md:hidden"
+            aria-label={mobileSearchOpen ? "بستن جستجو" : "باز کردن جستجو"}
+            aria-expanded={mobileSearchOpen}
+          >
+            {mobileSearchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+          </button>
+          <div className="hidden text-right sm:block">
+            <div className="max-w-28 truncate text-xs font-bold text-white">{me?.employee?.name || "کاربر"}</div>
+            <div className="max-w-28 truncate text-[10px] text-slate-500">{me?.role?.name || me?.role?.code || ""}</div>
+          </div>
+          <button onClick={async () => { await fetch("/api/auth/employee-logout", { method: "POST" }); window.location.href = "/employee-login"; }} className="rounded-xl border border-slate-800 px-2.5 py-2 text-[10px] text-slate-400 hover:text-white sm:px-3">خروج</button>
+        </div>
         </div>
 
         {/* Global Project Scope Selector */}
@@ -169,7 +208,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         </div>
 
         {/* Global Quick Search */}
-        <div className="relative w-48 sm:w-72">
+        <div className={`${mobileSearchOpen ? "block" : "hidden"} relative mt-2 w-full md:block lg:mt-0 lg:w-48 xl:w-72`}>
           <div className="relative">
             <Search className="absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
@@ -177,7 +216,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               placeholder="جستجوی سریع در سیستم..."
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
-              className="w-full rounded-xl border border-slate-800 bg-slate-900 py-1.5 pr-9 pl-4 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-xl border border-slate-800 bg-slate-900 py-2 pr-9 pl-4 text-base text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none md:py-1.5 md:text-xs"
             />
           </div>
 
@@ -232,28 +271,53 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 mr-3">
-          <div className="hidden sm:block text-right">
-            <div className="text-xs font-bold text-white">{me?.employee?.name || "کاربر"}</div>
-            <div className="text-[10px] text-slate-500">{me?.role?.name || me?.role?.code || ""}</div>
-          </div>
-          <button onClick={async () => { await fetch("/api/auth/employee-logout", { method: "POST" }); window.location.href = "/employee-login"; }} className="rounded-xl border border-slate-800 px-3 py-2 text-[10px] text-slate-400 hover:text-white">خروج</button>
-        </div>
       </header>
 
       {/* Workspace Container */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-w-0 flex-1 overflow-hidden">
+        {sidebarOpen && (
+          <button
+            type="button"
+            className="fixed inset-0 z-40 bg-black/65 backdrop-blur-[1px] lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="بستن منوی اصلی"
+          />
+        )}
         {/* Sidebar Nav */}
         <aside
-          className={`fixed inset-y-0 right-0 z-30 w-64 transform border-l border-slate-800/80 bg-slate-950/95 p-4 transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 overflow-y-auto ${
+          ref={sidebarRef}
+          tabIndex={-1}
+          aria-label="منوی اصلی"
+          className={`fixed bottom-0 right-0 top-0 z-50 w-[min(85vw,320px)] transform overflow-y-auto border-l border-slate-800/80 bg-slate-950/98 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl outline-none transition-transform duration-200 ease-in-out lg:static lg:z-30 lg:w-64 lg:translate-x-0 lg:p-4 lg:shadow-none ${
             sidebarOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
           <div className="flex items-center justify-between lg:hidden mb-4 border-b border-slate-800 pb-3">
-            <span className="font-bold text-white text-sm">منوی منو سیستم</span>
-            <button onClick={() => setSidebarOpen(false)} className="text-slate-400">
+            <span className="font-bold text-white text-sm">منوی سیستم</span>
+            <button onClick={() => setSidebarOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-900 hover:text-white" aria-label="بستن منو">
               <X className="h-5 w-5" />
             </button>
+          </div>
+
+          <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-3 lg:hidden">
+            <label htmlFor="mobile-project-scope" className="mb-2 flex items-center gap-2 text-xs text-slate-400">
+              <Folder className="h-4 w-4 text-blue-400" />
+              اسکوپ پروژه
+            </label>
+            <select
+              id="mobile-project-scope"
+              value={selectedProjectId || ""}
+              onChange={(e) => {
+                setSelectedProjectId(e.target.value || null);
+                setSidebarOpen(false);
+              }}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-base font-bold text-white outline-none"
+            >
+              <option value="">تمام پروژه‌ها (عمومی)</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name} ({project.code})</option>
+              ))}
+            </select>
           </div>
 
           <nav className="space-y-1">
@@ -327,7 +391,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         </aside>
 
         {/* Main View Area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className="app-main min-w-0 flex-1 overflow-y-auto overflow-x-clip p-3 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );

@@ -728,7 +728,7 @@ export const FinancialView: React.FC = () => {
             <ArrowDownRight className="h-4 w-4 text-emerald-400" />
             دریافت‌ها و تراکنش‌های تسویه مشتریان
           </h3>
-          <div className="overflow-x-auto">
+          <div className="responsive-table overflow-x-auto">
             <table className="w-full text-right text-xs text-slate-300">
               <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                 <tr>
@@ -791,7 +791,7 @@ export const FinancialView: React.FC = () => {
               + ثبت هزینه جدید
             </button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="responsive-table overflow-x-auto">
             <table className="w-full text-right text-xs text-slate-300">
               <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
                 <tr>
@@ -849,7 +849,9 @@ export const FinancialView: React.FC = () => {
       {/* MODAL: ADD / EDIT ACCOUNT */}
       {isAccountModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsAccountModalOpen(false);
           }}
@@ -984,7 +986,9 @@ export const FinancialView: React.FC = () => {
       {/* MODAL: ADD EXPENSE */}
       {isExpenseModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsExpenseModalOpen(false);
           }}
