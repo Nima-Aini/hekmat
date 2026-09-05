@@ -1,6 +1,10 @@
 import { toJalaliDate, formatMoney, formatRial, formatNumber } from "@/lib/dateUtils";
 import { numberToPersianWords } from "@/lib/numberToWords";
 
+export const INVOICE_DOCUMENT_WIDTH = 820;
+export const INVOICE_JPG_SCALE = 2;
+export const INVOICE_JPG_OUTPUT_WIDTH = INVOICE_DOCUMENT_WIDTH * INVOICE_JPG_SCALE;
+
 function escapeHtml(str: string | null | undefined): string {
   if (!str) return "";
   return String(str)
@@ -50,6 +54,7 @@ export interface PrintableInvoiceData {
     productNameSnapshot: string;
     productCode?: string | null;
     productUnit?: string | null;
+    customNotes?: string | null;
     quantity: number | string;
     unitPrice: number | string;
     discountAmount?: number | string;
@@ -89,11 +94,12 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
   const itemsRows = items
     .map(
       (item, idx) => `
-    <tr style="border-bottom: 1px solid #cbd5e1;">
+    <tr data-invoice-item-row style="border-bottom: 1px solid #cbd5e1;">
       <td style="padding: 7px 6px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${idx + 1}</td>
       <td style="padding: 7px 8px; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a; text-align: right;">
         ${escapeHtml(item.productNameSnapshot)}
         ${item.productCode ? `<span style="font-size: 10px; color: #475569; margin-right: 4px;">[${escapeHtml(item.productCode)}]</span>` : ""}
+        ${item.customNotes ? `<div style="font-size: 10px; color: #64748b; margin-top: 2px; font-weight: normal;">${escapeHtml(item.customNotes)}</div>` : ""}
       </td>
       <td style="padding: 7px 6px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${formatNumber(item.quantity)}</td>
       <td style="padding: 7px 6px; text-align: center; border-left: 1px solid #cbd5e1; color: #0f172a;">${escapeHtml(item.productUnit || "عدد")}</td>
@@ -111,6 +117,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
 <head>
   <meta charset="utf-8" />
   <title>فاکتور فروش شماره ${escapeHtml(invoice.invoiceNumber || "رسمی")}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" />
   <style>
     @page {
       size: A4 portrait;
@@ -120,7 +127,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: system-ui, -apple-system, "Segoe UI", Tahoma, Vazirmatn, sans-serif;
+      font-family: Vazirmatn, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
     }
     body {
       background-color: #ffffff;
@@ -128,12 +135,19 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       direction: rtl;
       font-size: 11px;
       line-height: 1.5;
-      padding: 10px;
+      width: ${INVOICE_DOCUMENT_WIDTH}px;
+      min-width: ${INVOICE_DOCUMENT_WIDTH}px;
+      padding: 0;
     }
-    .invoice-container {
-      width: 100%;
-      max-width: 820px;
-      margin: 0 auto;
+    .invoice-document {
+      box-sizing: border-box;
+      width: ${INVOICE_DOCUMENT_WIDTH}px;
+      min-width: ${INVOICE_DOCUMENT_WIDTH}px;
+      max-width: ${INVOICE_DOCUMENT_WIDTH}px;
+      height: auto;
+      max-height: none;
+      overflow: visible;
+      margin: 0;
       border: 2px solid #0f172a;
       border-radius: 12px;
       padding: 16px;
@@ -202,6 +216,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       color: #0f172a;
       font-weight: bold;
       border-bottom: 1px solid #0f172a;
+      display: table-header-group;
     }
     thead th {
       padding: 8px 6px;
@@ -260,6 +275,10 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       border-bottom: 1px dashed #64748b;
       margin: 8px 25px 0 25px;
     }
+    tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
     @media print {
       body {
         padding: 0;
@@ -267,9 +286,11 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
-      .invoice-container {
+      .invoice-document {
         border: 2px solid #000000;
-        max-width: 100%;
+      }
+      .table-container {
+        overflow: visible;
       }
       * {
         color: #000000 !important;
@@ -283,7 +304,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
   </style>
 </head>
 <body>
-  <div class="invoice-container">
+  <div class="invoice-document invoice-container">
     <!-- Header -->
     <div class="header-box">
       <div>
@@ -400,15 +421,16 @@ export function triggerInvoicePrint(data: PrintableInvoiceData): void {
   const html = generateInvoiceHtml(data);
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
-  iframe.style.right = "0";
+  iframe.style.left = "-10000px";
   iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
+  iframe.style.width = `${INVOICE_DOCUMENT_WIDTH}px`;
+  iframe.style.height = "1px";
   iframe.style.border = "0";
   document.body.appendChild(iframe);
 
   const doc = iframe.contentWindow?.document;
   if (!doc) {
+    iframe.remove();
     alert("امکان باز کردن پنجره چاپ وجود ندارد.");
     return;
   }
@@ -418,7 +440,8 @@ export function triggerInvoicePrint(data: PrintableInvoiceData): void {
   doc.close();
 
   iframe.contentWindow?.focus();
-  setTimeout(() => {
+  setTimeout(async () => {
+    await doc.fonts?.ready;
     iframe.contentWindow?.print();
     setTimeout(() => {
       if (document.body.contains(iframe)) {
@@ -431,7 +454,7 @@ export function triggerInvoicePrint(data: PrintableInvoiceData): void {
 /**
  * Downloads high quality JPG invoice safely without CSS oklch or clipping issues
  */
-export async function downloadInvoiceJpg(data: PrintableInvoiceData, element?: HTMLElement | null): Promise<void> {
+export async function downloadInvoiceJpg(data: PrintableInvoiceData, _element?: HTMLElement | null): Promise<void> {
   const invoiceNumber = data.invoice.invoiceNumber || "Factor";
   const filename = `Factor-${invoiceNumber}.jpg`;
 
@@ -439,38 +462,63 @@ export async function downloadInvoiceJpg(data: PrintableInvoiceData, element?: H
     const html2canvasModule = await import("html2canvas");
     const html2canvas = html2canvasModule.default || html2canvasModule;
 
-    // Create an isolated container outside viewport to render without modern CSS interference
-    const tempWrapper = document.createElement("div");
-    tempWrapper.style.position = "fixed";
-    tempWrapper.style.left = "-9999px";
-    tempWrapper.style.top = "0";
-    tempWrapper.style.width = "850px";
-    tempWrapper.style.backgroundColor = "#ffffff";
-    tempWrapper.style.zIndex = "-1000";
-    tempWrapper.style.padding = "20px";
-    tempWrapper.innerHTML = generateInvoiceHtml(data);
-
-    document.body.appendChild(tempWrapper);
-
-    const invoiceBox = tempWrapper.querySelector(".invoice-container") as HTMLElement || tempWrapper;
-
-    const canvas = await html2canvas(invoiceBox, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: "#ffffff",
-      logging: false,
-      windowWidth: 1000,
+    // Render the canonical document in an isolated fixed-width frame so the
+    // device viewport can never influence JPG dimensions or layout.
+    const renderFrame = document.createElement("iframe");
+    renderFrame.setAttribute("aria-hidden", "true");
+    renderFrame.style.position = "fixed";
+    renderFrame.style.left = "-10000px";
+    renderFrame.style.top = "0";
+    renderFrame.style.width = `${INVOICE_DOCUMENT_WIDTH}px`;
+    renderFrame.style.height = "1px";
+    renderFrame.style.border = "0";
+    renderFrame.style.pointerEvents = "none";
+    renderFrame.style.zIndex = "-1000";
+    const frameLoaded = new Promise<void>((resolve, reject) => {
+      renderFrame.onload = () => resolve();
+      renderFrame.onerror = () => reject(new Error("بارگذاری قالب فاکتور ناموفق بود."));
     });
+    renderFrame.srcdoc = generateInvoiceHtml(data);
+    document.body.appendChild(renderFrame);
 
-    document.body.removeChild(tempWrapper);
+    try {
+      await frameLoaded;
 
-    const imgData = canvas.toDataURL("image/jpeg", 0.95);
-    const link = document.createElement("a");
-    link.href = imgData;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      const frameDocument = renderFrame.contentDocument;
+      const invoiceBox = frameDocument?.querySelector(".invoice-document") as HTMLElement | null;
+      if (!frameDocument || !invoiceBox) throw new Error("سند فاکتور برای ساخت تصویر پیدا نشد.");
+
+      await frameDocument.fonts?.ready;
+      const documentHeight = Math.ceil(Math.max(
+        invoiceBox.scrollHeight,
+        invoiceBox.offsetHeight,
+        invoiceBox.getBoundingClientRect().height
+      ));
+      renderFrame.style.height = `${documentHeight}px`;
+
+      const canvas = await html2canvas(invoiceBox, {
+        scale: INVOICE_JPG_SCALE,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        width: INVOICE_DOCUMENT_WIDTH,
+        height: documentHeight,
+        windowWidth: INVOICE_DOCUMENT_WIDTH,
+        windowHeight: documentHeight,
+        scrollX: 0,
+        scrollY: 0,
+      });
+
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const link = document.createElement("a");
+      link.href = imgData;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } finally {
+      renderFrame.remove();
+    }
   } catch (err: any) {
     console.error("Invoice JPG capture error:", err);
     // Fallback: If html2canvas fails on element, try direct fallback

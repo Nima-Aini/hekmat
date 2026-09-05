@@ -13,12 +13,8 @@ import {
   CheckCircle,
   X,
   User,
-  DollarSign,
   FileText,
-  Calendar,
   CreditCard,
-  Building,
-  Download,
   Image as ImageIcon,
   Check,
   AlertCircle,
@@ -30,10 +26,14 @@ import {
   Trash2
 } from "lucide-react";
 import { toJalaliDate, formatMoney, formatMoneyDual, formatRial, formatNumber } from "@/lib/dateUtils";
-import { numberToPersianWords } from "@/lib/numberToWords";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
-import { triggerInvoicePrint, downloadInvoiceJpg } from "@/lib/invoicePrintHelper";
+import {
+  INVOICE_DOCUMENT_WIDTH,
+  downloadInvoiceJpg,
+  generateInvoiceHtml,
+  triggerInvoicePrint,
+} from "@/lib/invoicePrintHelper";
 
 export interface InvoiceItemFormItem {
   productId?: string | null;
@@ -95,7 +95,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     paymentDate: new Date() as Date | null,
   });
 
-  const printAreaRef = useRef<HTMLDivElement>(null);
+  const [invoicePreviewHeight, setInvoicePreviewHeight] = useState(720);
 
   // Form State
   const [form, setForm] = useState({
@@ -680,13 +680,10 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     if (!viewingInvoice) return;
     setDownloadingJpg(true);
     try {
-      await downloadInvoiceJpg(
-        {
-          ...viewingInvoice,
-          sellerInfo: systemSettings,
-        },
-        printAreaRef.current
-      );
+      await downloadInvoiceJpg({
+        ...viewingInvoice,
+        sellerInfo: systemSettings,
+      });
     } finally {
       setDownloadingJpg(false);
     }
@@ -832,7 +829,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
 
       {/* Invoices List */}
       <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/60 shadow-xl">
-        <div className="mobile-card-list gap-3 p-3" aria-label="فهرست فاکتورها">
+        <div className="grid gap-3 p-3 md:hidden" aria-label="فهرست فاکتورها">
           {loading ? (
             <div className="py-10 text-center text-sm text-slate-500">
               <RefreshCw className="mx-auto mb-2 h-6 w-6 animate-spin text-purple-500" />
@@ -889,7 +886,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           ))}
         </div>
 
-        <div className="desktop-table-only responsive-table overflow-x-auto">
+        <div className="responsive-table hidden overflow-x-auto md:block">
           <table className="w-full text-right text-xs text-slate-300">
             <thead className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-semibold">
               <tr>
@@ -1570,7 +1567,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
             if (e.target === e.currentTarget) setViewingInvoice(null);
           }}
         >
-          <div className="w-full max-w-4xl rounded-3xl border border-slate-300 bg-white p-6 md:p-8 text-slate-900 shadow-2xl my-6 space-y-6 print:p-0 print:m-0 print:border-none print:shadow-none print:max-w-none">
+          <div className="w-full max-w-[940px] rounded-3xl border border-slate-300 bg-white p-6 md:p-8 text-slate-900 shadow-2xl my-6 space-y-6">
             {/* Top Toolbar */}
             <div className="no-print flex justify-between items-center border-b border-slate-200 pb-4">
               <div className="flex items-center gap-2">
@@ -1606,205 +1603,31 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
               </div>
             </div>
 
-            {/* Printable Persian Invoice Canvas */}
-            <div
-              ref={printAreaRef}
-              id="persian-official-invoice"
-              className="bg-white p-6 rounded-2xl border-2 border-slate-800 space-y-5 text-xs text-slate-900 font-sans"
-              style={{ minHeight: "650px", direction: "rtl", backgroundColor: "#ffffff", color: "#0f172a" }}
-            >
-              {/* Header Box */}
-              <div className="border-b-2 border-slate-800 pb-4" style={{ borderColor: "#1e293b" }}>
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <h1 className="text-lg font-black tracking-tight text-slate-900" style={{ color: "#0f172a" }}>
-                      {systemSettings?.businessName || "سازمان و صنایع بازرگانی حکمت آکما"}
-                    </h1>
-                    <p className="text-[11px] text-slate-600 font-medium" style={{ color: "#475569" }}>
-                      صورتحساب فروش کالا و خدمات (فاکتور رسمی تجاری)
-                    </p>
-                  </div>
-
-                  <div className="border border-slate-400 rounded-xl p-2.5 text-center min-w-44 bg-slate-50 space-y-1 text-[11px]" style={{ borderColor: "#94a3b8", backgroundColor: "#f8fafc" }}>
-                    <div>
-                      <span className="text-slate-500" style={{ color: "#64748b" }}>شماره سریال فاکتور: </span>
-                      <span className="font-mono font-bold text-slate-900" style={{ color: "#0f172a" }}>{viewingInvoice.invoice.invoiceNumber}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500" style={{ color: "#64748b" }}>تاریخ صدور: </span>
-                      <span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>{toJalaliDate(viewingInvoice.invoice.invoiceDate)}</span>
-                    </div>
-                    {viewingInvoice.invoice.settlementDate && <div><span className="text-slate-500" style={{ color: "#64748b" }}>تاریخ تسویه: </span><span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>{toJalaliDate(viewingInvoice.invoice.settlementDate)}</span></div>}
-                  </div>
-                </div>
-              </div>
-
-              {/* Seller & Buyer Info Tables */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Seller Box */}
-                <div className="border border-slate-400 rounded-xl p-3 bg-slate-50 space-y-1 text-[11px]" style={{ borderColor: "#94a3b8", backgroundColor: "#f8fafc" }}>
-                  <div className="font-black text-slate-800 border-b border-slate-300 pb-1 flex items-center gap-1" style={{ color: "#1e293b", borderColor: "#cbd5e1" }}>
-                    <Building className="h-3.5 w-3.5 text-slate-700" />
-                    مشخصات فروشنده
-                  </div>
-                  <div>
-                    <span className="text-slate-500" style={{ color: "#64748b" }}>نام فروشنده: </span>
-                    <span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>{systemSettings?.businessName || "شرکت حکمت آکما"}</span>
-                  </div>
-                  <div>
-                    {systemSettings?.economicCode && (
-                      <>
-                        <span className="text-slate-500" style={{ color: "#64748b" }}>کد اقتصادی: </span>
-                        <span className="font-mono font-bold text-slate-900" style={{ color: "#0f172a" }}>{systemSettings.economicCode}</span>
-                        {systemSettings?.nationalId ? " | " : ""}
-                      </>
-                    )}
-                    {systemSettings?.nationalId && (
-                      <>
-                        <span className="text-slate-500" style={{ color: "#64748b" }}>شناسه ملی: </span>
-                        <span className="font-mono font-bold text-slate-900" style={{ color: "#0f172a" }}>{systemSettings.nationalId}</span>
-                      </>
-                    )}
-                  </div>
-                  {(systemSettings?.registrationNumber || systemSettings?.postalCode) && (
-                    <div>
-                      {systemSettings?.registrationNumber && (
-                        <>
-                          <span className="text-slate-500" style={{ color: "#64748b" }}>شماره ثبت: </span>
-                          <span className="font-mono text-slate-900" style={{ color: "#0f172a" }}>{systemSettings.registrationNumber}</span>
-                          {" | "}
-                        </>
-                      )}
-                      {systemSettings?.postalCode && (
-                        <>
-                          <span className="text-slate-500" style={{ color: "#64748b" }}>کد پستی: </span>
-                          <span className="font-mono text-slate-900" style={{ color: "#0f172a" }}>{systemSettings.postalCode}</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-slate-500" style={{ color: "#64748b" }}>نشانی و تلفن: </span>
-                    <span className="text-slate-900" style={{ color: "#0f172a" }}>
-                      {systemSettings?.companyAddress ? (
-                        <>
-                          {systemSettings.companyAddress}
-                          {systemSettings.companyPhone ? ` - تلفن: ${systemSettings.companyPhone}` : ""}
-                        </>
-                      ) : systemSettings?.companyPhone ? (
-                        `تلفن: ${systemSettings.companyPhone}`
-                      ) : (
-                        "دفتر مرکزی - تلفن: ۰۲۱-۸۸۹۹۰۰۱۱"
-                      )}
-                    </span>
-                  </div>
-                  {systemSettings?.taxOffice && (
-                    <div>
-                      <span className="text-slate-500" style={{ color: "#64748b" }}>حوزه مالیاتی: </span>
-                      <span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>{systemSettings.taxOffice}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Buyer Box */}
-                <div className="border border-slate-400 rounded-xl p-3 bg-slate-50 space-y-1 text-[11px]" style={{ borderColor: "#94a3b8", backgroundColor: "#f8fafc" }}>
-                  <div className="font-black text-slate-800 border-b border-slate-300 pb-1 flex items-center gap-1" style={{ color: "#1e293b", borderColor: "#cbd5e1" }}>
-                    <User className="h-3.5 w-3.5 text-slate-700" />
-                    مشخصات خریدار
-                  </div>
-                  <div><span className="text-slate-500" style={{ color: "#64748b" }}>نام خریدار / فروشگاه: </span><span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>{viewingInvoice.invoice.customerName} {viewingInvoice.invoice.customerStore ? `(${viewingInvoice.invoice.customerStore})` : ""}</span></div>
-                  <div><span className="text-slate-500" style={{ color: "#64748b" }}>شماره تماس / همراه: </span><span className="font-mono text-slate-900" style={{ color: "#0f172a" }}>{viewingInvoice.invoice.customerMobile || "—"}</span></div>
-                  <div><span className="text-slate-500" style={{ color: "#64748b" }}>نشانی تحویل: </span><span className="text-slate-900" style={{ color: "#0f172a" }}>{viewingInvoice.invoice.customerAddress || "تهران - ارسال حضوری"}</span></div>
-                </div>
-              </div>
-
-              {/* Items Table */}
-              <div className="border border-slate-800 rounded-xl overflow-hidden" style={{ borderColor: "#1e293b" }}>
-                <table className="w-full text-right text-[11px] border-collapse">
-                  <thead className="bg-slate-200 font-bold text-slate-800 border-b border-slate-800" style={{ backgroundColor: "#e2e8f0", color: "#1e293b", borderColor: "#1e293b" }}>
-                    <tr>
-                      <th className="p-2 border-r border-slate-400 text-center w-10" style={{ borderColor: "#94a3b8" }}>ردیف</th>
-                      <th className="p-2 border-r border-slate-400" style={{ borderColor: "#94a3b8" }}>کد و شرح کالا یا خدمات</th>
-                      <th className="p-2 border-r border-slate-400 text-center w-16" style={{ borderColor: "#94a3b8" }}>تعداد</th>
-                      <th className="p-2 border-r border-slate-400 text-center w-14" style={{ borderColor: "#94a3b8" }}>واحد</th>
-                      <th className="p-2 border-r border-slate-400 text-left w-28" style={{ borderColor: "#94a3b8" }}>مبلغ واحد (تومان)</th>
-                      <th className="p-2 border-r border-slate-400 text-left w-24" style={{ borderColor: "#94a3b8" }}>تخفیف (تومان)</th>
-                      <th className="p-2 text-left w-32">مبلغ کل (تومان)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-300 bg-white" style={{ backgroundColor: "#ffffff" }}>
-                    {viewingInvoice.items.map((i: any, index: number) => (
-                      <tr key={i.id || index} style={{ borderBottom: "1px solid #cbd5e1" }}>
-                        <td className="p-2 border-r border-slate-300 text-center font-bold text-slate-700" style={{ borderColor: "#cbd5e1", color: "#0f172a" }}>{index + 1}</td>
-                        <td className="p-2 border-r border-slate-300 font-bold text-slate-900" style={{ borderColor: "#cbd5e1", color: "#0f172a" }}>
-                          {i.productNameSnapshot}
-                          {i.productCode && <span className="text-[10px] text-slate-600 font-mono font-normal mr-2" style={{ color: "#334155" }}>[{i.productCode}]</span>}
-                          {i.customNotes && <div className="text-[10px] text-slate-500 font-normal mt-0.5" style={{ color: "#64748b" }}>{i.customNotes}</div>}
-                        </td>
-                        <td className="p-2 border-r border-slate-300 text-center font-bold font-mono text-slate-900" style={{ borderColor: "#cbd5e1", color: "#0f172a" }}>{formatNumber(i.quantity)}</td>
-                        <td className="p-2 border-r border-slate-300 text-center text-slate-700" style={{ borderColor: "#cbd5e1", color: "#0f172a" }}>{i.productUnit || "عدد"}</td>
-                        <td className="p-2 border-r border-slate-300 text-left font-mono font-medium text-slate-900" style={{ borderColor: "#cbd5e1", color: "#0f172a" }}>{formatMoney(i.unitPrice, "")}</td>
-                        <td className="p-2 border-r border-slate-300 text-left font-mono font-medium text-slate-900" style={{ borderColor: "#cbd5e1", color: "#0f172a" }}>{formatMoney(i.discountAmount || 0, "")}</td>
-                        <td className="p-2 text-left font-bold font-mono text-slate-900" style={{ color: "#0f172a" }}>{formatMoney(i.lineTotal, "")}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Financial Calculation Box - ALL PRICES BLACK */}
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                <div className="border border-slate-300 rounded-xl p-3 bg-slate-50 text-[11px] space-y-2 flex flex-col justify-between" style={{ borderColor: "#cbd5e1", backgroundColor: "#f8fafc" }}>
-                  <div>
-                    <div className="text-slate-600 font-semibold mb-1" style={{ color: "#334155" }}>مبلغ کل قابل پرداخت به حروف:</div>
-                    <div className="font-bold text-slate-900 leading-relaxed text-xs" style={{ color: "#0f172a" }}>
-                      {numberToPersianWords(viewingInvoice.invoice.grandTotal, "تومان")}
-                    </div>
-                    <div className="text-[10px] text-slate-600 mt-1 font-mono font-medium" style={{ color: "#334155" }}>
-                      معادل: {formatRial(viewingInvoice.invoice.grandTotal)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border border-slate-800 rounded-xl p-3 bg-slate-50 text-[11px] space-y-1.5" style={{ borderColor: "#1e293b", backgroundColor: "#f8fafc" }}>
-                  <div className="flex justify-between text-slate-900" style={{ color: "#0f172a" }}>
-                    <span>جمع اقلام:</span>
-                    <span className="font-mono font-bold text-slate-900" style={{ color: "#0f172a" }}>{formatMoney(viewingInvoice.invoice.subtotal)}</span>
-                  </div>
-                  {Number(viewingInvoice.invoice.invoiceDiscount) > 0 && (
-                    <div className="flex justify-between text-slate-900" style={{ color: "#0f172a" }}>
-                      <span>تخفیف فاکتور:</span>
-                      <span className="font-mono font-bold text-slate-900" style={{ color: "#0f172a" }}>{formatMoney(viewingInvoice.invoice.invoiceDiscount)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-slate-900 font-black text-xs border-t border-slate-400 pt-1.5" style={{ borderColor: "#94a3b8", color: "#0f172a" }}>
-                    <span>مبلغ کل فاکتور:</span>
-                    <span className="font-mono font-black text-slate-900" style={{ color: "#0f172a" }}>{formatMoney(viewingInvoice.invoice.grandTotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-900 font-bold border-t border-slate-300 pt-1" style={{ borderColor: "#cbd5e1", color: "#0f172a" }}>
-                    <span>مبلغ پرداخت شده:</span>
-                    <span className="font-mono font-bold text-slate-900" style={{ color: "#0f172a" }}>{formatMoney(viewingInvoice.invoice.paidAmount)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-900 font-bold" style={{ color: "#0f172a" }}>
-                    <span>مانده بدهی (طلب):</span>
-                    <span className="font-mono font-bold text-slate-900" style={{ color: "#0f172a" }}>{formatMoney(viewingInvoice.invoice.balanceDue)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Signatures & Stamps */}
-              <div className="grid grid-cols-2 gap-4 border-t-2 border-slate-800 pt-6 text-[11px]" style={{ borderColor: "#1e293b" }}>
-                <div className="text-center space-y-8">
-                  <span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>
-                    مهر و امضای فروشنده ({systemSettings?.businessName || "شرکت حکمت آکما"})
-                  </span>
-                  <div className="h-10 border-b border-dashed border-slate-400 mx-10" style={{ borderColor: "#94a3b8" }}></div>
-                </div>
-                <div className="text-center space-y-8">
-                  <span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>مهر و امضای خریدار / تحویل‌گیرنده کالا</span>
-                  <div className="h-10 border-b border-dashed border-slate-400 mx-10" style={{ borderColor: "#94a3b8" }}></div>
-                </div>
-              </div>
+            {/* Canonical fixed-width invoice document */}
+            <div className="invoice-preview-viewport w-full overflow-x-auto rounded-2xl bg-slate-200 p-2 sm:p-3" dir="rtl">
+              <iframe
+                title={`پیش‌نمایش فاکتور ${viewingInvoice.invoice.invoiceNumber}`}
+                srcDoc={generateInvoiceHtml({ ...viewingInvoice, sellerInfo: systemSettings })}
+                onLoad={(event) => {
+                  const frameDocument = event.currentTarget.contentDocument;
+                  if (!frameDocument) return;
+                  const documentElement = frameDocument.documentElement;
+                  const body = frameDocument.body;
+                  setInvoicePreviewHeight(Math.ceil(Math.max(
+                    documentElement.scrollHeight,
+                    documentElement.offsetHeight,
+                    body.scrollHeight,
+                    body.offsetHeight
+                  )));
+                }}
+                className="block border-0 bg-white"
+                style={{
+                  width: `${INVOICE_DOCUMENT_WIDTH}px`,
+                  minWidth: `${INVOICE_DOCUMENT_WIDTH}px`,
+                  maxWidth: `${INVOICE_DOCUMENT_WIDTH}px`,
+                  height: `${invoicePreviewHeight}px`,
+                }}
+              />
             </div>
 
             {/* Bottom Actions */}
@@ -1825,7 +1648,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                   {downloadingJpg ? "در حال ذخیره تصویر..." : "دانلود تصویر (JPG)"}
                 </button>
                 <button
-                  onClick={() => window.print()}
+                  onClick={handlePrintInvoice}
                   className="flex items-center gap-1.5 rounded-xl bg-slate-900 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 transition shadow-md"
                 >
                   <Printer className="h-4 w-4" />
