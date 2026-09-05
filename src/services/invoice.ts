@@ -59,6 +59,7 @@ export interface CreateInvoiceInput {
     accountId: string;
     paymentMethod: string;
     referenceNumber?: string;
+    paymentDate?: Date;
   };
   notes?: string;
   manualInvoiceNumber?: string;
@@ -372,6 +373,7 @@ export async function createInvoice(input: CreateInvoiceInput) {
         paidAmount: initialPayAmount.toString(),
         balanceDue: balanceDue.toString(),
         paymentStatus,
+        settlementDate: paymentStatus === "paid" ? (input.initialPayment?.paymentDate || input.invoiceDate || new Date()) : null,
         status: "issued",
         notes: input.notes || null,
       })
@@ -487,6 +489,7 @@ export async function createInvoice(input: CreateInvoiceInput) {
           accountId: input.initialPayment.accountId,
           paymentType: "customer_receipt",
           amount: initialPayAmount.toString(),
+          paymentDate: input.initialPayment.paymentDate || input.invoiceDate || new Date(),
           paymentMethod: input.initialPayment.paymentMethod || "pos",
           referenceNumber: input.initialPayment.referenceNumber || null,
           status: "completed",
@@ -609,6 +612,7 @@ export async function reverseInvoice(invoiceId: string, reason: string) {
         paidAmount: "0",
         balanceDue: "0",
         paymentStatus: "unpaid",
+        settlementDate: null,
         updatedAt: new Date(),
       })
       .where(eq(invoices.id, invoiceId))
@@ -906,6 +910,7 @@ export async function updateInvoice(
       patch.grossProfitTotal = grossProfitTotal.toString();
       patch.balanceDue = balanceDue.toString();
       patch.paymentStatus = paymentStatus;
+      patch.settlementDate = paymentStatus === "paid" ? existing.settlementDate : null;
 
       // Insert new invoice items & inventory out
       for (const item of processedItems) {
@@ -957,6 +962,7 @@ export async function updateInvoice(
       patch.grossProfitTotal = (grandTotal - Number(existing.cogsTotal)).toString();
       patch.paymentStatus = balanceDue === 0 ? "paid" : paidAmount > 0 ? "partial" : "unpaid";
       patch.balanceDue = balanceDue.toString();
+      patch.settlementDate = balanceDue === 0 ? existing.settlementDate : null;
     }
 
     const [updated] = await tx

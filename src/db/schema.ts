@@ -437,6 +437,7 @@ export const invoices = pgTable("invoices", {
   paidAmount: numeric("paid_amount", { precision: 15, scale: 2 }).default("0").notNull(),
   balanceDue: numeric("balance_due", { precision: 15, scale: 2 }).default("0").notNull(),
   paymentStatus: text("payment_status").default("unpaid").notNull(), // unpaid, partial, paid, overdue
+  settlementDate: timestamp("settlement_date"),
   status: text("status").default("issued").notNull(), // issued, cancelled, reversed, corrected
   reversalReason: text("reversal_reason"),
   commissionSnapshot: jsonb("commission_snapshot"),
@@ -474,6 +475,8 @@ export const accounts = pgTable("accounts", {
   bankName: text("bank_name"),
   balance: numeric("balance", { precision: 15, scale: 2 }).default("0").notNull(),
   isDefault: boolean("is_default").default(false),
+  status: text("status").default("active").notNull(), // active, archived
+  archivedAt: timestamp("archived_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

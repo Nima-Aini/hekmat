@@ -1,4 +1,4 @@
-import { apiError } from "@/lib/apiError";
+import { ApiError, apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { accounts, payments, expenses } from "@/db/schema";
@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const type = url.searchParams.get("type");
 
-    const conditions = [];
+    const conditions = [eq(accounts.status, "active")];
     if (type && type !== "all") {
       conditions.push(eq(accounts.type, type));
     }
@@ -183,34 +183,21 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ success: false, error: "شناسه حساب مشخص نشده است." }, { status: 400 });
     }
 
-    // Check if payments or expenses use this account
-    const [hasPayments] = await db.select().from(payments).where(eq(payments.accountId, id)).limit(1);
-    if (hasPayments) {
-      return NextResponse.json(
-        { success: false, error: "امکان حذف این حساب وجود ندارد زیرا تراکنش‌های پرداختی/دریافتی به آن متصل است." },
-        { status: 400 }
-      );
-    }
-
-    const [hasExpenses] = await db.select().from(expenses).where(eq(expenses.accountId, id)).limit(1);
-    if (hasExpenses) {
-      return NextResponse.json(
-        { success: false, error: "امکان حذف این حساب وجود ندارد زیرا رکوردهای هزینه جاری به آن متصل است." },
-        { status: 400 }
-      );
-    }
-
-    const [deleted] = await db.delete(accounts).where(eq(accounts.id, id)).returning();
-    if (!deleted) {
-      return NextResponse.json({ success: false, error: "حساب یافت نشد." }, { status: 404 });
-    }
-
-    await logAuditEvent("DELETE", "account", id, { name: deleted.name, code: deleted.code });
-
-    return NextResponse.json({
-      success: true,
-      message: `حساب «${deleted.name}» با موفقیت حذف شد.`,
+    const result = await db.transaction(async (tx) => {
+      const [account] = await tx.select().from(accounts).where(eq(accounts.id, id)).for("update").limit(1);
+      if (!account) throw new ApiError(404, "حساب یافت نشد.");
+      const [hasPayments] = await tx.select({ id: payments.id }).from(payments).where(eq(payments.accountId, id)).limit(1);
+      const [hasExpenses] = await tx.select({ id: expenses.id }).from(expenses).where(eq(expenses.accountId, id)).limit(1);
+      if (hasPayments || hasExpenses || Number(account.balance) !== 0) {
+        const [archived] = await tx.update(accounts).set({ status: "archived", archivedAt: new Date(), isDefault: false }).where(eq(accounts.id, id)).returning();
+        return { account: archived, archived: true };
+      }
+      const [deleted] = await tx.delete(accounts).where(eq(accounts.id, id)).returning();
+      return { account: deleted, archived: false };
     });
+
+    await logAuditEvent(result.archived ? "ARCHIVE" : "DELETE", "account", id, { name: result.account.name, code: result.account.code });
+    return NextResponse.json({ success: true, archived: result.archived, message: result.archived ? `حساب «${result.account.name}» دارای سابقه مالی است و بایگانی شد.` : `حساب «${result.account.name}» با موفقیت حذف شد.` });
   } catch (error: any) {
     return apiError(error);
   }

@@ -92,6 +92,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     paymentMethod: "pos",
     referenceNumber: "",
     notes: "",
+    paymentDate: new Date() as Date | null,
   });
 
   const printAreaRef = useRef<HTMLDivElement>(null);
@@ -108,6 +109,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     items: [] as InvoiceItemFormItem[],
     initialPaymentAmount: 0,
     initialPaymentAccountId: "",
+    initialPaymentDate: new Date() as Date | null,
     notes: "",
   });
 
@@ -314,6 +316,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         : [],
       initialPaymentAmount: 0,
       initialPaymentAccountId: accounts[0]?.id || "",
+      initialPaymentDate: new Date(),
       notes: "",
     });
     if (defaultProjId) {
@@ -356,6 +359,8 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     }
   };
 
+  const addCustomLineItem = () => setForm({ ...form, items: [...form.items, { isCustom: true, productName: "", customUnit: "عدد", quantity: 1, unitPrice: 0, discountAmount: 0 }] });
+
   const removeLineItem = (index: number) => {
     setForm({
       ...form,
@@ -382,9 +387,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         invoiceDiscount: form.invoiceDiscount,
         items: form.items.map((it) => ({
           productId: it.productId,
-          isCustom: false,
-          productName: undefined,
-          customUnit: undefined,
+          isCustom: Boolean(it.isCustom),
+          productName: it.productName,
+          customUnit: it.customUnit,
           customNotes: undefined,
           quantity: it.quantity,
           unitPrice: it.unitPrice,
@@ -398,6 +403,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           amount: form.initialPaymentAmount,
           accountId: form.initialPaymentAccountId,
           paymentMethod: "pos",
+          paymentDate: form.initialPaymentDate ? form.initialPaymentDate.toISOString() : undefined,
         };
       }
 
@@ -442,9 +448,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       items: res.items && res.items.length > 0
         ? res.items.map((i: any) => ({
             productId: i.productId || i.specialProductId || null,
-            isCustom: false,
-            productName: "",
-            customUnit: "عدد",
+            isCustom: Boolean(i.isCustom),
+            productName: i.productNameSnapshot || "",
+            customUnit: i.customUnit || "عدد",
             customNotes: "",
             quantity: Number(i.quantity) || 1,
             unitPrice: Number(i.unitPrice) || 0,
@@ -490,6 +496,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       });
     }
   };
+  const addEditCustomLineItem = () => setEditForm({ ...editForm, items: [...editForm.items, { isCustom: true, productName: "", customUnit: "عدد", quantity: 1, unitPrice: 0, discountAmount: 0 }] });
 
   const removeEditLineItem = (index: number) => {
     setEditForm({
@@ -520,9 +527,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           invoiceDiscount: editForm.invoiceDiscount,
           items: editForm.items.map((it) => ({
             productId: it.productId,
-            isCustom: false,
-            productName: undefined,
-            customUnit: undefined,
+            isCustom: Boolean(it.isCustom),
+            productName: it.productName,
+            customUnit: it.customUnit,
             customNotes: undefined,
             quantity: it.quantity,
             unitPrice: it.unitPrice,
@@ -607,6 +614,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       paymentMethod: "pos",
       referenceNumber: "",
       notes: "",
+      paymentDate: new Date(),
     });
   };
 
@@ -637,6 +645,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           paymentMethod: paymentForm.paymentMethod,
           referenceNumber: paymentForm.referenceNumber,
           notes: paymentForm.notes,
+          paymentDate: paymentForm.paymentDate ? paymentForm.paymentDate.toISOString() : undefined,
         }),
       }).then((r) => r.json());
 
@@ -653,6 +662,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         paymentMethod: "pos",
         referenceNumber: "",
         notes: "",
+        paymentDate: new Date(),
       });
       await fetchData();
     } catch (e: any) {
@@ -856,7 +866,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                       ) : inv.paymentStatus === "paid" ? (
                         <span className="inline-flex items-center gap-1 rounded-xl bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 text-[11px] text-emerald-300">
                           <CheckCircle className="h-3 w-3" />
-                          تسویه کامل
+                          تسویه کامل{inv.settlementDate ? ` — ${toJalaliDate(inv.settlementDate)}` : ""}
                         </span>
                       ) : inv.paymentStatus === "partial" ? (
                         <span className="inline-flex items-center gap-1 rounded-xl bg-amber-950/60 border border-amber-500/30 px-2.5 py-1 text-[11px] text-amber-300">
@@ -1024,6 +1034,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                       <Plus className="h-3.5 w-3.5" />
                       افزودن کالا
                     </button>
+                    <button type="button" onClick={addCustomLineItem} className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-950/30 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-900/50 transition">
+                      <Plus className="h-3.5 w-3.5" /> افزودن هزینه / آیتم دستی
+                    </button>
                   </div>
                 </div>
 
@@ -1051,6 +1064,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                             <td className="p-3 font-bold text-slate-500 text-center">{idx + 1}</td>
                             <td className="p-3">
                               <div className="space-y-2">
+                                {item.isCustom ? (
+                                  <input value={item.productName || ""} placeholder="عنوان هزینه یا خدمت" onChange={(e) => { const updated = [...form.items]; updated[idx].productName = e.target.value; setForm({ ...form, items: updated }); }} className="w-full rounded-xl border border-amber-500/30 bg-slate-900 p-2 text-white" />
+                                ) : (
                                 <div>
                                   <select
                                     value={item.productId || ""}
@@ -1070,6 +1086,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                                     </span>
                                   )}
                                 </div>
+                                )}
                               </div>
                             </td>
                             <td className="p-3">
@@ -1163,6 +1180,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                       </select>
                     </div>
                   </div>
+                  <JalaliDatePicker label="تاریخ واقعی پرداخت / تسویه" value={form.initialPaymentDate} onChange={(d) => setForm({ ...form, initialPaymentDate: d })} />
                 </div>
 
                 <div className="space-y-2 border-r border-slate-800 pr-4">
@@ -1448,6 +1466,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                       className="w-full rounded-xl border border-slate-800 bg-slate-950 p-2.5 text-white"
                     />
                   </div>
+                  <JalaliDatePicker label="تاریخ واقعی پرداخت / تسویه" value={paymentForm.paymentDate} onChange={(d) => setPaymentForm({ ...paymentForm, paymentDate: d })} />
                 </div>
 
                 <div className="flex justify-end pt-2">
@@ -1548,6 +1567,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                       <span className="text-slate-500" style={{ color: "#64748b" }}>تاریخ صدور: </span>
                       <span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>{toJalaliDate(viewingInvoice.invoice.invoiceDate)}</span>
                     </div>
+                    {viewingInvoice.invoice.settlementDate && <div><span className="text-slate-500" style={{ color: "#64748b" }}>تاریخ تسویه: </span><span className="font-bold text-slate-900" style={{ color: "#0f172a" }}>{toJalaliDate(viewingInvoice.invoice.settlementDate)}</span></div>}
                   </div>
                 </div>
               </div>
@@ -1871,6 +1891,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                       <Plus className="h-3.5 w-3.5" />
                       افزودن کالا
                     </button>
+                    <button type="button" onClick={addEditCustomLineItem} className="flex items-center gap-1 rounded-xl border border-amber-500/30 bg-amber-950/30 px-3 py-1.5 font-bold text-amber-300 hover:bg-amber-950/60 transition"><Plus className="h-3.5 w-3.5" /> افزودن آیتم دستی</button>
                   </div>
                 </div>
 
@@ -1889,7 +1910,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                           <div className="flex items-center gap-2">
                             <span className="font-mono font-bold text-slate-500 text-xs">#{index + 1}</span>
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-900/60 text-purple-300 border border-purple-700/60">
-                              کالای فاکتور شده
+                              {item.isCustom ? "هزینه / خدمت دستی" : "کالای فاکتور شده"}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1907,6 +1928,9 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                           <div className="sm:col-span-4">
                             <label className="block text-[10px] text-slate-400 mb-0.5">انتخاب محصول</label>
+                            {item.isCustom ? (
+                              <input value={item.productName || ""} placeholder="عنوان هزینه یا خدمت" onChange={(e) => { const updated = [...editForm.items]; updated[index].productName = e.target.value; setEditForm({ ...editForm, items: updated }); }} className="w-full rounded-xl border border-amber-500/30 bg-slate-900 p-2 text-white text-xs" />
+                            ) : (
                             <select
                               value={item.productId || ""}
                               onChange={(e) => handleEditProductChange(index, e.target.value)}
@@ -1918,6 +1942,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                                 </option>
                               ))}
                             </select>
+                            )}
                           </div>
 
                           <div className="sm:col-span-2">
