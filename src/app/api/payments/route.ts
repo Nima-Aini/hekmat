@@ -58,6 +58,8 @@ export async function POST(req: Request) {
     assertUuid(body.accountId);
     for (const field of ["customerId", "invoiceId", "projectId"]) if (body[field]) assertUuid(body[field]);
     const amt = Number(decimal(body.amount, "مبلغ پرداخت", 2, true));
+    const paymentDate = body.paymentDate ? new Date(body.paymentDate) : new Date();
+    if (Number.isNaN(paymentDate.getTime())) throw new ApiError(400, "تاریخ پرداخت نامعتبر است.");
     if (body.paymentType && body.paymentType !== "customer_receipt") throw new ApiError(400, "این مسیر مخصوص ثبت دریافت مشتری است.");
     const payNum = `PAY-${crypto.randomUUID()}`;
     const identity = requestIdentity(req, context.employeeId, body);
@@ -101,6 +103,7 @@ export async function POST(req: Request) {
           accountId: body.accountId,
           paymentType: body.paymentType || "customer_receipt",
           amount: amt.toString(),
+          paymentDate,
           paymentMethod: body.paymentMethod || "pos",
           referenceNumber: body.referenceNumber || null,
           notes: body.notes || null,
@@ -123,7 +126,7 @@ export async function POST(req: Request) {
           const newStatus = newBalance === 0 ? "paid" : "partial";
           await tx
             .update(invoices)
-            .set({ paidAmount: newPaid.toString(), balanceDue: newBalance.toString(), paymentStatus: newStatus, updatedAt: new Date() })
+            .set({ paidAmount: newPaid.toString(), balanceDue: newBalance.toString(), paymentStatus: newStatus, settlementDate: newStatus === "paid" ? paymentDate : null, updatedAt: new Date() })
             .where(eq(invoices.id, body.invoiceId));
         }
       }

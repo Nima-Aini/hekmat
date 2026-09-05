@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import { GET as projectList, POST as createProject } from "../src/app/api/projects/route";
 import { POST as createExpense } from "../src/app/api/expenses/route";
+import { DELETE as deleteAccount } from "../src/app/api/accounts/route";
 const state = vi.hoisted(() => ({ db: null as unknown, permission: "allow" }));
 vi.mock("@/db", () => ({ get db() { return state.db; }, pool: {} }));
 vi.mock("@/services/access", async () => {
@@ -58,6 +59,19 @@ describe("Production product lifecycle against PostgreSQL", () => {
       for (const row of result.rows) if (!known.has(row.column_name)) blocking.push(`${config.name}.${row.column_name}`);
     }
     expect(blocking).toEqual([]);
+  });
+  it("deletes unused accounts and archives accounts with financial history", async () => {
+    const [unused] = await database.insert(accounts).values({ code: randomUUID(), name: "بدون تراکنش", type: "cash" }).returning();
+    const unusedResult = await deleteAccount(new Request(`http://localhost/api/accounts?id=${unused.id}`, { method: "DELETE" }));
+    expect(unusedResult.status).toBe(200);
+    expect(await database.select().from(accounts).where(eq(accounts.id, unused.id))).toHaveLength(0);
+
+    const [used] = await database.insert(accounts).values({ code: randomUUID(), name: "با تراکنش", type: "cash" }).returning();
+    await database.insert(payments).values({ paymentNumber: randomUUID(), accountId: used.id, paymentType: "customer_receipt", amount: "1" });
+    const usedResult = await deleteAccount(new Request(`http://localhost/api/accounts?id=${used.id}`, { method: "DELETE" }));
+    const usedPayload = await usedResult.json();
+    expect(usedPayload.archived).toBe(true);
+    expect((await database.select().from(accounts).where(eq(accounts.id, used.id)))[0].status).toBe("archived");
   });
   it("does not swallow access denials in project and expense APIs", async () => {
     state.permission = "denied";
@@ -145,6 +159,29 @@ describe("Production product lifecycle against PostgreSQL", () => {
     await expect(reverseInvoice(first.id, "تکرار")).rejects.toThrow();
     expect(Number((await database.select().from(products).where(eq(products.id, p.id)))[0].stockQuantity)).toBe(10);
     await expect(updateInvoice(first.id, { invoiceDiscount: 20 })).rejects.toThrow();
+  });
+  it("stores manual invoice items as snapshots and recalculates settlement date", async () => {
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری آیتم دستی", mobile: "09121111111" }).returning();
+    const [account] = await database.insert(accounts).values({ code: randomUUID(), name: "حساب آیتم دستی", type: "cash" }).returning();
+    const paidOn = new Date("2026-09-02T10:00:00.000Z");
+    const invoice = await createInvoice({
+      customerId: customer.id,
+      items: [{ isCustom: true, productName: "هزینه ارسال", quantity: 1, unitPrice: 100 }],
+      initialPayment: { amount: 100, accountId: account.id, paymentMethod: "cash", paymentDate: paidOn },
+    });
+    const [stored] = await database.select().from(invoices).where(eq(invoices.id, invoice.id));
+    const [item] = await database.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id));
+    const [payment] = await database.select().from(payments).where(eq(payments.invoiceId, invoice.id));
+    expect(item.productId).toBeNull();
+    expect(item.isCustom).toBe(true);
+    expect(item.productNameSnapshot).toBe("هزینه ارسال");
+    expect(stored.paymentStatus).toBe("paid");
+    expect(stored.settlementDate?.toISOString()).toBe(paidOn.toISOString());
+    expect(payment.paymentDate.toISOString()).toBe(paidOn.toISOString());
+    await updateInvoice(invoice.id, { items: [{ isCustom: true, productName: "هزینه ارسال", quantity: 1, unitPrice: 200 }] });
+    const [recalculated] = await database.select().from(invoices).where(eq(invoices.id, invoice.id));
+    expect(recalculated.paymentStatus).toBe("partial");
+    expect(recalculated.settlementDate).toBeNull();
   });
   it("permanently deletes an issued invoice while preserving real payments", async () => {
     const p = await create();

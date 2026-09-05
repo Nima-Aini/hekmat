@@ -292,6 +292,7 @@ export async function migrateDatabase() {
       paid_amount NUMERIC(15,2) DEFAULT 0,
       balance_due NUMERIC(15,2) DEFAULT 0,
       payment_status TEXT DEFAULT 'unpaid',
+      settlement_date TIMESTAMP,
       status TEXT DEFAULT 'issued',
       reversal_reason TEXT,
       notes TEXT,
@@ -323,6 +324,8 @@ export async function migrateDatabase() {
       account_number TEXT,
       balance NUMERIC(15,2) DEFAULT 0,
       is_default BOOLEAN DEFAULT false,
+      status TEXT DEFAULT 'active' NOT NULL,
+      archived_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL,
       updated_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
@@ -946,7 +949,7 @@ export async function migrateDatabase() {
       ('suppliers.view','مشاهده تامین‌کنندگان'),('suppliers.create','ایجاد تامین‌کننده'),('suppliers.update','ویرایش تامین‌کننده'),
       ('production.view','مشاهده تولید'),('production.create','ثبت تولید'),('inventory.view','مشاهده انبار'),('purchases.view','مشاهده خرید'),('purchases.create','ایجاد خرید'),('purchases.edit','ویرایش خرید'),('purchases.delete','حذف خرید'),
       ('expenses.view','مشاهده هزینه‌ها'),('expenses.create','ایجاد هزینه'),('expenses.edit','ویرایش هزینه'),('expenses.delete','حذف هزینه'),
-      ('financial.view','مشاهده مالی'),('financial.edit','ویرایش مالی'),('admin.settings','تنظیمات مدیریتی'),
+      ('financial.view','مشاهده مالی'),('financial.edit','ویرایش مالی'),('financial.delete','حذف یا بایگانی حساب'),('admin.settings','تنظیمات مدیریتی'),
       ('alerts.view','مشاهده اعلان‌ها'),('alerts.resolve','حل اعلان‌ها'),
       ('ai.view','مشاهده هوش مصنوعی'),('backup.view','مشاهده پشتیبان‌گیری'),('backup.create','ایجاد پشتیبان'),('settings.view','مشاهده تنظیمات'),
       ('global_search','جستجوی سراسری'),
@@ -955,6 +958,9 @@ export async function migrateDatabase() {
 
     INSERT INTO role_permissions(role_id, permission_id)
       SELECT r.id, p.id FROM roles r CROSS JOIN permissions p WHERE r.code='admin'
+    ON CONFLICT DO NOTHING;
+    INSERT INTO role_permissions(role_id, permission_id)
+      SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code = 'financial.delete' WHERE r.code = 'manager'
     ON CONFLICT DO NOTHING;
     INSERT INTO role_permissions(role_id, permission_id)
       SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN ('customers.view','customers.create','customers.update','orders.view','orders.create','invoices.view','invoices.create','invoices.update','commissions.view','reports.view','projects.view','customers.transfer','payments.create') WHERE r.code='sales'
@@ -978,6 +984,11 @@ export async function migrateDatabase() {
     -- 20260905 request idempotency: nullable additions retain all existing rows.
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS request_key TEXT;
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS request_hash TEXT;
+    -- Additive fields: retain all existing financial data and lifecycle history.
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS settlement_date TIMESTAMP;
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP;
+    UPDATE accounts SET status = 'active' WHERE status IS NULL;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS request_key TEXT;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS request_hash TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS invoices_request_key_unique ON invoices(request_key);
@@ -1116,4 +1127,3 @@ export async function migrateDatabase() {
 
   console.log("Migration completed successfully!");
 }
-

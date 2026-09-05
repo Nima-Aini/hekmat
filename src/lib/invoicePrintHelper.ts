@@ -29,6 +29,7 @@ export interface PrintableInvoiceData {
     id: string;
     invoiceNumber: string;
     invoiceDate?: string | Date | null;
+    settlementDate?: string | Date | null;
     customerName?: string | null;
     customerStore?: string | null;
     customerMobile?: string | null;
@@ -63,6 +64,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
   const discountNum = Number(invoice.invoiceDiscount) || 0;
   const paidNum = Number(invoice.paidAmount) || 0;
   const balanceNum = Number(invoice.balanceDue) || 0;
+  const settlementLine = invoice.settlementDate ? `<div style="margin-top: 3px;"><span style="color: #475569;">تاریخ تسویه: </span><strong style="color: #0f172a;">${toJalaliDate(invoice.settlementDate)}</strong></div>` : "";
 
   const sellerName = escapeHtml(sellerInfo?.businessName || "سازمان و صنایع بازرگانی حکمت آکما");
   const economicCode = escapeHtml(sellerInfo?.economicCode || "");
@@ -290,7 +292,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       </div>
       <div class="meta-box">
         <div><span style="color: #475569;">شماره فاکتور: </span><strong style="color: #0f172a;">${escapeHtml(invoice.invoiceNumber || "—")}</strong></div>
-        <div style="margin-top: 3px;"><span style="color: #475569;">تاریخ صدور: </span><strong style="color: #0f172a;">${toJalaliDate(invoice.invoiceDate)}</strong></div>
+        <div style="margin-top: 3px;"><span style="color: #475569;">تاریخ صدور: </span><strong style="color: #0f172a;">${toJalaliDate(invoice.invoiceDate)}</strong></div>${settlementLine}
       </div>
     </div>
 
@@ -475,4 +477,3 @@ export async function downloadInvoiceJpg(data: PrintableInvoiceData, element?: H
     alert("خطا در ایجاد تصویر فاکتور: " + (err?.message || "لطفاً از دکمه چاپ و ذخیره PDF استفاده کنید."));
   }
 }
-
