@@ -1,5 +1,5 @@
 import type { Transaction } from "./product";
-import { ApiError, decimal } from "@/lib/apiError";
+import { ApiError, assertUuid, decimal } from "@/lib/apiError";
 import crypto from "node:crypto";
 import { db } from "@/db";
 import {
@@ -15,7 +15,9 @@ import {
   accounts,
   inventoryLedger,
   projects,
-  commissionRules
+  commissionRules,
+  alerts,
+  tasks
 } from "@/db/schema";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { recordInventoryTransaction } from "./inventory";
@@ -581,7 +583,10 @@ export async function reverseInvoice(invoiceId: string, reason: string) {
         // Mark payment as reversed
         await tx
           .update(payments)
-          .set({ status: "cancelled", notes: sql`COALESCE(notes, '') || ' (ابطال شده بابت فاکتور #${inv.invoiceNumber})'` })
+          .set({
+            status: "cancelled",
+            notes: sql`COALESCE(${payments.notes}, '') || ${` (ابطال شده بابت فاکتور #${inv.invoiceNumber})`}`,
+          })
           .where(eq(payments.id, pay.id));
       }
     }
@@ -1056,8 +1061,105 @@ export async function updateInvoice(
   });
 }
 
-/** Retain financial history; deletion means audited reversal. */
+/**
+ * Permanently delete an invoice while preserving independent cash movements.
+ * Every mutation is committed atomically or rolled back as a unit.
+ */
 export async function deleteInvoice(invoiceId: string, reason?: string) {
-  await reverseInvoice(invoiceId, reason || "ابطال به درخواست حذف");
-  return { success: true, message: "فاکتور باطل شد؛ سوابق مالی حفظ شدند." };
+  assertUuid(invoiceId);
+  return db.transaction(async (tx) => {
+    const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for("update").limit(1);
+    if (!invoice) throw new ApiError(404, "فاکتور یافت نشد.");
+
+    const deletionReason = reason?.trim() || "حذف دائم توسط مدیر";
+    const items = await tx.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+
+    // Issued/corrected invoices still affect stock. Reversed/cancelled invoices
+    // have already returned it and must never be applied a second time.
+    if (invoice.status === "issued" || invoice.status === "corrected") {
+      for (const item of items) {
+        if (!item.productId || item.isCustom) continue;
+        await recordInventoryTransaction({
+          itemType: "product",
+          itemId: item.productId,
+          transactionType: "sales_return",
+          quantityChange: Number(item.quantity),
+          unitCostSnapshot: Number(item.unitCostSnapshot),
+          referenceType: "deleted_invoice_adjustment",
+          projectId: invoice.projectId,
+          notes: `بازگردانی موجودی بابت حذف دائم فاکتور #${invoice.invoiceNumber}`,
+        }, tx);
+      }
+    }
+
+    // Inventory history remains auditable, but cannot point to an invoice that
+    // no longer exists. The stock-changing deletion adjustment is already
+    // recorded above without a dangling reference id.
+    await tx.update(inventoryLedger).set({
+      referenceId: null,
+      referenceType: "deleted_invoice",
+      notes: sql`COALESCE(${inventoryLedger.notes}, '') || ${` [فاکتور حذف‌شده #${invoice.invoiceNumber}]`}`,
+    }).where(and(
+      eq(inventoryLedger.referenceId, invoiceId),
+      sql`${inventoryLedger.referenceType} IN ('invoice', 'invoice_update', 'invoice_reversal')`
+    ));
+
+    const allocations = await tx.select().from(paymentAllocations).where(eq(paymentAllocations.invoiceId, invoiceId)).for("update");
+    const directPayments = await tx.select().from(payments).where(eq(payments.invoiceId, invoiceId)).for("update");
+    const linkedPaymentIds = new Set([...allocations.map(row => row.paymentId), ...directPayments.map(row => row.id)]);
+
+    // A receipt is a real cash/bank movement. Keep its status, amount and the
+    // account balance exactly as-is; remove only its allocation/direct link.
+    for (const paymentId of linkedPaymentIds) {
+      const directlyLinked = directPayments.some(payment => payment.id === paymentId);
+      await tx.update(payments).set({
+        ...(directlyLinked ? { invoiceId: null } : {}),
+        notes: sql`COALESCE(${payments.notes}, '') || ${` [اتصال به فاکتور حذف‌شده #${invoice.invoiceNumber} برداشته شد]`}`,
+      }).where(eq(payments.id, paymentId));
+    }
+    await tx.delete(paymentAllocations).where(eq(paymentAllocations.invoiceId, invoiceId));
+
+    // Unpaid commission has no independent financial movement and can be
+    // removed. Paid/settled commission is retained as reversed history and is
+    // detached from the invoice so payout records are never destroyed.
+    const commissions = await tx.select().from(commissionLedger).where(eq(commissionLedger.invoiceId, invoiceId)).for("update");
+    for (const commission of commissions) {
+      const hasFinancialHistory = commission.paymentId || commission.status === "paid" || commission.status === "settled";
+      if (hasFinancialHistory) {
+        await tx.update(commissionLedger).set({
+          invoiceId: null,
+          status: "reversed",
+          notes: sql`COALESCE(${commissionLedger.notes}, '') || ${` [برگشت پورسانت بابت حذف فاکتور #${invoice.invoiceNumber}]`}`,
+        }).where(eq(commissionLedger.id, commission.id));
+      } else {
+        await tx.delete(commissionLedger).where(eq(commissionLedger.id, commission.id));
+      }
+    }
+
+    // Generic references are not database FKs, but detaching them prevents
+    // broken links in the UI while retaining alert/task history.
+    await tx.update(alerts).set({ entityId: null, status: "resolved", updatedAt: new Date() })
+      .where(and(eq(alerts.entityType, "invoice"), eq(alerts.entityId, invoiceId)));
+    await tx.update(tasks).set({ entityId: null, updatedAt: new Date() })
+      .where(and(eq(tasks.entityType, "invoice"), eq(tasks.entityId, invoiceId)));
+
+    await tx.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+    await tx.delete(invoices).where(eq(invoices.id, invoiceId));
+
+    await recalculateCustomerHealth(invoice.customerId, tx);
+    await logAuditEvent("DELETE", "invoice", invoiceId, {
+      invoiceNumber: invoice.invoiceNumber,
+      reason: deletionReason,
+      paymentCount: linkedPaymentIds.size,
+      commissionCount: commissions.length,
+      stockReturned: invoice.status === "issued" || invoice.status === "corrected",
+    }, undefined, tx);
+
+    return {
+      success: true,
+      message: linkedPaymentIds.size
+        ? "فاکتور حذف شد؛ موجودی و پورسانت اصلاح شدند و دریافت‌های مالی بدون تغییر در حساب حفظ شدند."
+        : "فاکتور حذف شد و آثار موجودی و پورسانت آن با موفقیت اصلاح شدند.",
+    };
+  });
 }

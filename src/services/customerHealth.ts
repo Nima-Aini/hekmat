@@ -133,7 +133,7 @@ export async function recalculateCustomerHealth(customerId: string, client: Tran
     });
 
     if (newStatus === "red" || (oldStatus === "green" && newStatus === "yellow")) {
-      await client.insert(alerts).values({
+      const alertValues = {
         type: "health_red",
         severity: newStatus === "red" ? "critical" : "warning",
         title: `افت سلامت مشتری: ${customer.name}`,
@@ -141,6 +141,16 @@ export async function recalculateCustomerHealth(customerId: string, client: Tran
         entityType: "customer",
         entityId: customerId,
         dedupKey: `health_${customerId}_${newStatus}`,
+      };
+      await client.insert(alerts).values(alertValues).onConflictDoUpdate({
+        target: alerts.dedupKey,
+        set: {
+          severity: alertValues.severity,
+          title: alertValues.title,
+          message: alertValues.message,
+          status: "new",
+          updatedAt: new Date(),
+        },
       });
     }
   }

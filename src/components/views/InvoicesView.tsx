@@ -1295,7 +1295,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                 مبلغ فاکتور: {formatMoney(deletingInvoice.grandTotal)} | خریدار: {deletingInvoice.customerName}
               </p>
               <p className="text-[11px] text-rose-400">
-                توجه: اقلام فاکتور به موجودی انبار بازگردانده شده و سوابق مالی و پورسانت متصل به این فاکتور لغو خواهد شد.
+                توجه: موجودی کالا فقط در صورت فعال بودن فاکتور بازگردانده می‌شود. دریافت‌های واقعی بانکی/صندوق حذف یا کم نمی‌شوند و فقط اتصال آن‌ها به فاکتور برداشته می‌شود؛ پورسانت‌های تسویه‌نشده نیز برگشت داده خواهند شد.
               </p>
             </div>
 
@@ -2045,4 +2045,3 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     </div>
   );
 };
-

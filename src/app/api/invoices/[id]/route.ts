@@ -165,6 +165,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const result = await deleteInvoice(id, "حذف مستقیم فاکتور");
     return NextResponse.json({ success: true, message: result.message });
   } catch (error: any) {
-    return apiError(error);
+    return apiError(error, "حذف فاکتور");
   }
 }
