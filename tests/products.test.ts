@@ -2,30 +2,34 @@ import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { PgDialect, getTableConfig, PgTable } from "drizzle-orm/pg-core";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { GET as projectList, POST as createProject } from "../src/app/api/projects/route";
 import { POST as createExpense } from "../src/app/api/expenses/route";
 import { DELETE as deleteAccount } from "../src/app/api/accounts/route";
+import { GET as getCustomers, POST as createCustomer } from "../src/app/api/customers/route";
+import { GET as getEmployeeCustomers } from "../src/app/api/employees/[id]/customers/route";
 const state = vi.hoisted(() => ({ db: null as unknown, permission: "allow" }));
 vi.mock("@/db", () => ({ get db() { return state.db; }, pool: {} }));
 vi.mock("@/services/access", async () => {
   const { ApiError } = await import("../src/lib/apiError");
-  return { requirePermission: vi.fn(async () => {
+  const context = () => ({ employeeId: randomUUID(), roleCode: "admin", permissions: new Set(["*"]) });
+  return { getEmployeeContext: vi.fn(async () => context()), requirePermission: vi.fn(async () => {
     if (state.permission === "anonymous") throw new ApiError(401, "ابتدا وارد شوید");
     if (state.permission === "denied") throw new ApiError(403, "دسترسی مجاز نیست");
-    return { employeeId: randomUUID(), permissions: new Set(["*"]) };
+    return context();
   }) };
 });
 import * as schema from "../src/db/schema";
 import { migrateDatabase } from "../src/db/migrate";
-import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, invoices, invoiceItems, productionBatches, commissionRules, commissionLedger, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers, accounts, payments, paymentAllocations, employees, alerts } from "../src/db/schema";
+import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, customerAssignments, customerProjectMemberships, invoices, invoiceItems, productionBatches, commissionRules, commissionLedger, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers, accounts, payments, paymentAllocations, employees, alerts } from "../src/db/schema";
 import { DELETE, PUT } from "../src/app/api/products/[id]/route";
 import { POST, GET } from "../src/app/api/products/route";
 import { DELETE as deleteSpecial } from "../src/app/api/special-products/[id]/route";
 import { createInvoice, deleteInvoice, reverseInvoice, updateInvoice } from "../src/services/invoice";
 import { productInput } from "../src/services/product";
+import { assignCustomer } from "../src/services/partner";
 const pg = new PGlite();
 const database = drizzle(pg);
 const dialect = new PgDialect();
@@ -79,6 +83,37 @@ describe("Production product lifecycle against PostgreSQL", () => {
     expect((await createProject(request({ name: "test" }))).status).toBe(403);
     expect((await createExpense(request({ title: "test", amount: 1 }))).status).toBe(403);
     state.permission = "allow";
+  });
+  it("paginates after project filters and keeps customer assignment history idempotent", async () => {
+    const [project] = await database.insert(projects).values({ code: randomUUID(), name: "پروژه صفحه‌بندی" }).returning();
+    const [visitorA] = await database.insert(employees).values({ code: randomUUID(), name: "ویزیتور الف", mobile: "09122222221" }).returning();
+    const [visitorB] = await database.insert(employees).values({ code: randomUUID(), name: "ویزیتور ب", mobile: "09122222222" }).returning();
+    const ids: string[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      const [customer] = await database.insert(customers).values({ code: randomUUID(), name: `مشتری ${i}`, mobile: `0913${String(i).padStart(7, "0")}` }).returning();
+      ids.push(customer.id);
+      await assignCustomer(customer.id, i < 15 ? visitorA.id : visitorB.id, project.id, "test");
+    }
+    const first = await (await getCustomers(new Request(`http://localhost/api/customers?projectId=${project.id}&page=1&pageSize=20`))).json();
+    const second = await (await getCustomers(new Request(`http://localhost/api/customers?projectId=${project.id}&page=2&pageSize=20`))).json();
+    expect(first.pagination).toMatchObject({ total: 30, totalPages: 2 });
+    expect(first.customers).toHaveLength(20);
+    expect(second.customers).toHaveLength(10);
+    expect((await (await getEmployeeCustomers(new Request("http://localhost"), params(visitorA.id))).json()).customers).toHaveLength(15);
+
+    await assignCustomer(ids[0], visitorA.id, project.id, "repeat");
+    expect(await database.select().from(customerAssignments).where(and(eq(customerAssignments.customerId, ids[0]), eq(customerAssignments.status, "active")))).toHaveLength(1);
+    expect(await database.select().from(customerProjectMemberships).where(eq(customerProjectMemberships.customerId, ids[0]))).toHaveLength(1);
+    await assignCustomer(ids[0], visitorB.id, project.id, "transfer");
+    const history = await database.select().from(customerAssignments).where(eq(customerAssignments.customerId, ids[0]));
+    expect(history).toHaveLength(2);
+    expect(history.filter((row) => row.status === "ended")).toHaveLength(1);
+    expect(history.find((row) => row.status === "active")?.employeeId).toBe(visitorB.id);
+
+    const response = await createCustomer(new Request("http://localhost/api/customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "مشتری API", mobile: "09124444444", assignedEmployeeId: visitorA.id, projectId: project.id }) }));
+    const created = (await response.json()).customer;
+    expect(await database.select().from(customerAssignments).where(and(eq(customerAssignments.customerId, created.id), eq(customerAssignments.status, "active")))).toHaveLength(1);
+    expect(await database.select().from(customerProjectMemberships).where(eq(customerProjectMemberships.customerId, created.id))).toHaveLength(1);
   });
   it("creates valid products and rejects incomplete/invalid prices", async () => {
     for (const body of [{}, { name: "x", basePrice: -1 }, { name: "x", basePrice: "bad" }, { name: "x", basePrice: null }]) expect((await POST(request(body))).status).toBe(400);

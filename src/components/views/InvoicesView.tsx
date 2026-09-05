@@ -215,9 +215,13 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     setLoading(true);
     try {
       const projParam = selectedProjectId ? `?projectId=${selectedProjectId}` : "";
-      const [invRes, custRes, projRes, prodRes, accRes, empRes, settRes, specRes] = await Promise.all([
+      const firstCustomersPage = await fetch("/api/customers?page=1&pageSize=100").then((r) => r.json());
+      const customerPages = firstCustomersPage.success && firstCustomersPage.pagination?.totalPages > 1
+        ? await Promise.all(Array.from({ length: Math.min(firstCustomersPage.pagination.totalPages - 1, 49) }, (_, index) => fetch(`/api/customers?page=${index + 2}&pageSize=100`).then((r) => r.json())))
+        : [];
+      const custRes = { ...firstCustomersPage, customers: [ ...(firstCustomersPage.customers || []), ...customerPages.flatMap((page) => page.success ? (page.customers || []) : []) ] };
+      const [invRes, projRes, prodRes, accRes, empRes, settRes, specRes] = await Promise.all([
         fetch(`/api/invoices${projParam}`).then((r) => r.json()),
-        fetch("/api/customers").then((r) => r.json()),
         fetch("/api/projects").then((r) => r.json()),
         fetch(selectedProjectId ? `/api/products?projectId=${selectedProjectId}` : "/api/products").then((r) => r.json()),
         fetch("/api/accounts").then((r) => r.json()),

@@ -928,6 +928,31 @@ export async function migrateDatabase() {
       WHERE c.assigned_employee_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM customer_assignments ca WHERE ca.customer_id = c.id AND ca.status = 'active');
 
+    -- Preserve mismatched active rows as ended history before repairing current ownership.
+    UPDATE customer_assignments ca
+      SET status = 'ended', ended_at = COALESCE(ca.ended_at, NOW())
+      FROM customers c
+      WHERE ca.customer_id = c.id
+        AND ca.status = 'active'
+        AND ca.employee_id IS DISTINCT FROM c.assigned_employee_id;
+
+    -- Repair missed assignment rows without deleting historical assignments.
+    INSERT INTO customer_assignments(customer_id, employee_id, assigned_at, assigned_by, assignment_reason, status)
+      SELECT c.id, c.assigned_employee_id, COALESCE(c.updated_at, c.created_at, NOW()), 'migration', 'assigned_employee_backfill', 'active'
+      FROM customers c
+      WHERE c.assigned_employee_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM customer_assignments ca
+          WHERE ca.customer_id = c.id AND ca.status = 'active'
+        );
+
+    -- Project is certain only when it is already recorded on an active assignment.
+    INSERT INTO customer_project_memberships(customer_id, project_id, assigned_at)
+      SELECT ca.customer_id, ca.project_id, ca.assigned_at
+      FROM customer_assignments ca
+      WHERE ca.status = 'active' AND ca.project_id IS NOT NULL
+    ON CONFLICT (customer_id, project_id) DO NOTHING;
+
     INSERT INTO roles(code, name, project_scoped) VALUES
       ('admin', 'مدیر سیستم', false),
       ('manager', 'مدیر', true),
@@ -996,6 +1021,8 @@ export async function migrateDatabase() {
 
     -- Phase 21: Performance Indexes
     CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_customers_assigned_employee ON customers(assigned_employee_id);
+    CREATE INDEX IF NOT EXISTS idx_customer_assignments_customer_status ON customer_assignments(customer_id, status);
     CREATE INDEX IF NOT EXISTS idx_invoices_project ON invoices(project_id);
     CREATE INDEX IF NOT EXISTS idx_invoices_employee ON invoices(employee_id);
     CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(invoice_date);

@@ -109,7 +109,7 @@ export default function EmployeeDashboardPage() {
 
       const [d, c, i, cat, pay] = await Promise.allSettled([
         fetch(`/api/employees/${m.employee.id}/dashboard`, { cache: "no-store" }).then((x) => x.json()),
-        fetch(`/api/customers${isAccountant ? "" : "?mine=1"}`, { cache: "no-store" }).then((x) => x.json()),
+        fetch(`/api/customers?${isAccountant ? "" : "mine=1&"}pageSize=100`, { cache: "no-store" }).then((x) => x.json()),
         fetch(`/api/invoices${isAccountant ? "" : "?mine=1"}`, { cache: "no-store" }).then((x) => x.json()),
         fetch("/api/employee/catalog", { cache: "no-store" }).then((x) => x.json()),
         fetch("/api/payments", { cache: "no-store" }).then((x) => x.json()),
