@@ -1,3 +1,5 @@
+import { ApiError } from "@/lib/apiError";
+import type { Transaction } from "./product";
 import { db } from "@/db";
 import { inventoryLedger, products, rawMaterials, warehouses } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -29,7 +31,7 @@ export interface InventoryTransactionInput {
 
 export async function getDefaultWarehouseId(
   type: "central" | "raw_materials" | "finished_goods" = "central",
-  tx?: any
+  tx?: Transaction
 ): Promise<string> {
   const client = tx || db;
   const [existing] = await client
@@ -56,8 +58,10 @@ export async function getDefaultWarehouseId(
 /**
  * Records an inventory transaction with FOR UPDATE row locking to prevent race conditions.
  */
-export async function recordInventoryTransaction(input: InventoryTransactionInput, tx?: any) {
-  const client = tx || db;
+export async function recordInventoryTransaction(input: InventoryTransactionInput, tx?: Transaction): Promise<typeof inventoryLedger.$inferSelect> {
+  if (!tx) return db.transaction(client => recordInventoryTransaction(input, client));
+  if (!Number.isFinite(input.quantityChange) || (input.unitCostSnapshot !== undefined && (!Number.isFinite(input.unitCostSnapshot) || input.unitCostSnapshot < 0))) throw new ApiError(400, "مقدار گردش انبار معتبر نیست.");
+  const client = tx;
   const warehouseId =
     input.warehouseId ||
     (await getDefaultWarehouseId(input.itemType === "raw_material" ? "raw_materials" : "finished_goods", client));
@@ -142,7 +146,7 @@ export async function recordInventoryTransaction(input: InventoryTransactionInpu
     stockAfter: newStock,
     referenceType: input.referenceType,
     referenceId: input.referenceId,
-  });
+  }, undefined, client);
 
   return ledgerEntry;
 }

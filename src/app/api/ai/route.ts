@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/services/access";
 import { queryAIAssistant, chatWithAI } from "@/services/ai";
@@ -33,6 +34,6 @@ export async function POST(req: Request) {
     const result = await queryAIAssistant(body.question, body.projectId);
     return NextResponse.json({ success: true, result });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

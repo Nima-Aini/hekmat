@@ -1,20 +1,28 @@
+import { pageNumber } from "@/lib/apiError";
+import { requestIdentity } from "@/lib/idempotency";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { invoices, invoiceItems, customers, projects, employees, payments } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and } from "drizzle-orm";
 import { createInvoice, reverseInvoice } from "@/services/invoice";
 import { getEmployeeContext, requirePermission } from "@/services/access";
 
 export async function GET(req: Request) {
   try {
-    await requirePermission("invoices.view", new URL(req.url).searchParams.get("projectId"));
+    const context = await requirePermission("invoices.view", new URL(req.url).searchParams.get("projectId"));
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get("projectId");
     const customerId = searchParams.get("customerId");
-    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
+    const page = pageNumber(searchParams.get("page"), 1);
+    const pageSize = pageNumber(searchParams.get("pageSize"), 20, 100);
     const offset = (page - 1) * pageSize;
 
+    const manager = context.permissions.has("*") || ["admin", "manager"].includes(context.roleCode || "") || context.permissions.has("invoices.manage");
+    const conditions = [];
+    if (!manager) conditions.push(eq(invoices.employeeId, context.employeeId));
+    if (projectId) conditions.push(eq(invoices.projectId, projectId));
+    if (customerId) conditions.push(eq(invoices.customerId, customerId));
     const query = db
       .select({
         invoice: invoices,
@@ -27,22 +35,13 @@ export async function GET(req: Request) {
       .innerJoin(customers, eq(invoices.customerId, customers.id))
       .leftJoin(projects, eq(invoices.projectId, projects.id))
       .leftJoin(employees, eq(invoices.employeeId, employees.id))
+      .where(and(...conditions))
       .orderBy(desc(invoices.createdAt))
       .limit(pageSize)
       .offset(offset);
 
     const results = await query;
-    const context = await getEmployeeContext();
-
-    const filtered = results.filter(({ invoice }) => {
-      const isManager = !context || context.permissions.has("*") || context.roleCode === "manager" || context.roleCode === "admin" || context.permissions.has("invoices.manage");
-      if (!isManager && context && invoice.employeeId !== context.employeeId) return false;
-      if (projectId && invoice.projectId !== projectId) return false;
-      if (customerId && invoice.customerId !== customerId) return false;
-      return true;
-    });
-
-    const formatted = filtered.map(({ invoice, customerName, customerStore, projectName, employeeName }) => ({
+    const formatted = results.map(({ invoice, customerName, customerStore, projectName, employeeName }) => ({
       ...invoice,
       customerName: customerStore ? `${customerName} (${customerStore})` : customerName,
       projectName: projectName || "عمومی",
@@ -57,7 +56,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ success: true, invoices: formatted, pagination: { page, pageSize } });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -116,7 +115,7 @@ export async function POST(req: Request) {
     // 2. If current user is a restricted salesperson, use context.employeeId.
     // 3. Otherwise fallback to customer's assigned visitor or null (direct sale).
     let finalEmployeeId: string | null = null;
-    if (body.employeeId !== undefined && body.employeeId !== null && body.employeeId !== "") {
+    if (isManagerOrAdmin && body.employeeId !== undefined && body.employeeId !== null && body.employeeId !== "") {
       finalEmployeeId = body.employeeId;
     } else if (context && context.employeeId && context.employeeId !== "admin" && !isManagerOrAdmin) {
       finalEmployeeId = context.employeeId;
@@ -126,6 +125,7 @@ export async function POST(req: Request) {
     }
 
     const created = await createInvoice({
+      ...requestIdentity(req, context.employeeId, body),
       customerId: body.customerId,
       projectId: body.projectId || null,
       salesMode: body.salesMode || "direct",
@@ -143,6 +143,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, invoice: created });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

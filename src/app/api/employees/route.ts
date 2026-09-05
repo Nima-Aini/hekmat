@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { employees } from "@/db/schema";
@@ -17,7 +18,7 @@ export async function GET(req: Request) {
     if (status) list = list.filter((e: any) => e.status === status);
     return NextResponse.json({ success: true, employees: list });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -62,6 +63,6 @@ export async function POST(req: Request) {
     await logAuditEvent("CREATE", "employee", created.id, { name: created.name, role: created.role });
     return NextResponse.json({ success: true, employee: created });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

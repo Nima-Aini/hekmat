@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { offboardEmployee } from "@/services/employeeOffboard";
 import { requirePermission } from "@/services/access";
@@ -20,6 +21,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, result });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }

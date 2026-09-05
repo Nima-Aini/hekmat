@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { employees, employeeAccounts, roles } from "@/db/schema";
@@ -27,6 +28,6 @@ export async function GET(req: Request) {
       permissions: permissions.map((p) => p.code),
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "خطا در بررسی هویت" }, { status: 500 });
+    return apiError(error);
   }
 }

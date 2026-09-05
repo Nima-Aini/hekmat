@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { expenses, accounts, payments } from "@/db/schema";
@@ -8,6 +10,7 @@ import { logAuditEvent } from "@/services/audit";
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     await requirePermission("reports.view", id);
 
     const rows = await db
@@ -34,13 +37,14 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       expenses: rows.map((x: any) => ({ ...x, amount: Number(x.amount) })),
     });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 403 });
+    return apiError(e);
   }
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     await requirePermission("projects.expense.manage", id);
     const b = await req.json();
 
@@ -101,7 +105,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await logAuditEvent("CREATE", "expense", row.id, { projectId: id, amount: amt, accountId: b.accountId });
     return NextResponse.json({ success: true, expense: row });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+    return apiError(e);
   }
 }
 
@@ -149,6 +153,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
     return NextResponse.json({ success: true });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+    return apiError(e);
   }
 }

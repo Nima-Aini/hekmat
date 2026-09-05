@@ -40,6 +40,7 @@ export const ProductsView: React.FC = () => {
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [customProjectPrice, setCustomPrice] = useState(0);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     code: "",
@@ -62,11 +63,13 @@ export const ProductsView: React.FC = () => {
         fetch("/api/raw-materials").then((r) => r.json()),
       ]);
 
-      if (prodRes.success) setProducts(prodRes.products || []);
+      if (!prodRes.success) throw new Error(prodRes.error || "خطا در دریافت محصولات");
+      setProducts(prodRes.products || []);
       if (projRes.success) setProjects(projRes.projects || []);
       if (rmRes.success) setRawMaterials(rmRes.rawMaterials || []);
     } catch (err) {
       console.error("Error fetching products:", err);
+      alert(err instanceof Error ? err.message : "خطا در دریافت محصولات");
     } finally {
       setLoading(false);
     }
@@ -92,19 +95,22 @@ export const ProductsView: React.FC = () => {
   };
 
   const handleDeleteProduct = async (p: any) => {
-    if (!window.confirm(`آیا از حذف محصول «${p.name}» با کد «${p.code}» مطمئن هستید؟`)) {
+    if (deletingId) return;
+    if (!window.confirm(`محصول دارای سابقه بایگانی می‌شود و سوابق آن حفظ می‌شود. آیا از حذف محصول «${p.name}» با کد «${p.code}» مطمئن هستید؟`)) {
       return;
     }
+    setDeletingId(p.id);
     try {
       const res = await fetch(`/api/products/${p.id}`, { method: "DELETE" }).then((r) => r.json());
       if (res.success) {
-        fetchData();
+        alert(res.message || "عملیات انجام شد.");
+        await fetchData();
       } else {
         alert(res.error || "خطا در حذف محصول");
       }
     } catch (err: any) {
       alert(err.message || "خطا در برقراری ارتباط با سرور");
-    }
+    } finally { setDeletingId(null); }
   };
 
   const handleSaveAdd = async (e: React.FormEvent) => {
@@ -220,6 +226,7 @@ export const ProductsView: React.FC = () => {
   };
 
   const openEditProduct = async (product: any) => {
+    try {
     const res = await fetch(`/api/products/${product.id}`).then((r) => r.json());
     if (!res.success) return alert(res.error || "خطا در دریافت محصول");
     setEditingProduct(res.product);
@@ -238,6 +245,7 @@ export const ProductsView: React.FC = () => {
         wastagePercent: Number(r.wastagePercent || 0),
       })),
     });
+    } catch { alert("خطا در دریافت محصول؛ دوباره تلاش کنید."); }
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {

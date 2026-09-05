@@ -1,3 +1,7 @@
+import { deleteOrArchiveProduct, productInput } from "@/services/product";
+import { assertUuid } from "@/lib/apiError";
+import { requirePermission } from "@/services/access";
+import { apiError } from "@/lib/apiError";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { products } from "@/db/schema";
@@ -8,7 +12,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requirePermission("products.view");
     const { id } = await params;
+    assertUuid(id);
     const items = await db
       .select()
       .from(products)
@@ -28,10 +34,7 @@ export async function GET(
     });
   } catch (err: any) {
     console.error("Error fetching special product:", err);
-    return NextResponse.json(
-      { success: false, error: err.message || "خطا در دریافت اطلاعات محصول اختصاصی" },
-      { status: 500 }
-    );
+    return apiError(err);
   }
 }
 
@@ -40,7 +43,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requirePermission("products.update");
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
     const {
       name,
@@ -68,29 +73,8 @@ export async function PUT(
       );
     }
 
-    const updateData: any = {
-      updatedAt: new Date(),
-    };
-
-    if (name !== undefined) {
-      if (!name.trim()) {
-        return NextResponse.json(
-          { success: false, error: "نام محصول الزامی است." },
-          { status: 400 }
-        );
-      }
-      updateData.name = name.trim();
-    }
-
-    if (category !== undefined) updateData.category = category.trim() || "اختصاصی";
-    if (unit !== undefined) updateData.unit = unit.trim() || "عدد";
-    if (imageUrl !== undefined) updateData.imageUrl = imageUrl?.trim() || null;
-    if (description !== undefined) updateData.description = description?.trim() || null;
-    if (basePrice !== undefined) updateData.basePrice = String(Math.max(0, Number(basePrice) || 0));
-    if (stockQuantity !== undefined) updateData.stockQuantity = String(Math.max(0, Number(stockQuantity) || 0));
-    if (minStockQuantity !== undefined) updateData.minStockQuantity = String(Math.max(0, Number(minStockQuantity) || 0));
-    if (status !== undefined) updateData.status = status === "inactive" ? "inactive" : "active";
-    if (notes !== undefined) updateData.notes = notes?.trim() || null;
+    const { data } = productInput(body);
+    const updateData = { ...data, isSpecial: true, updatedAt: new Date() };
 
     const [updated] = await db
       .update(products)
@@ -105,10 +89,7 @@ export async function PUT(
     });
   } catch (err: any) {
     console.error("Error updating special product:", err);
-    return NextResponse.json(
-      { success: false, error: err.message || "خطا در بروزرسانی محصول اختصاصی" },
-      { status: 500 }
-    );
+    return apiError(err);
   }
 }
 
@@ -117,31 +98,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requirePermission("products.delete");
     const { id } = await params;
-    const existing = await db
-      .select()
-      .from(products)
-      .where(and(eq(products.id, id), eq(products.isSpecial, true)))
-      .limit(1);
-
-    if (existing.length === 0) {
-      return NextResponse.json(
-        { success: false, error: "محصول اختصاصی یافت نشد." },
-        { status: 404 }
-      );
-    }
-
-    await db.delete(products).where(and(eq(products.id, id), eq(products.isSpecial, true)));
-
-    return NextResponse.json({
-      success: true,
-      message: `محصول اختصاصی «${existing[0].name}» (${existing[0].code}) با موفقیت حذف گردید.`,
-    });
+    assertUuid(id);
+    const result = await deleteOrArchiveProduct(id, true);
+    return NextResponse.json({ success: true, archived: result.archived, message: result.message });
   } catch (err: any) {
     console.error("Error deleting special product:", err);
-    return NextResponse.json(
-      { success: false, error: err.message || "خطا در حذف محصول اختصاصی" },
-      { status: 500 }
-    );
+    return apiError(err);
   }
 }

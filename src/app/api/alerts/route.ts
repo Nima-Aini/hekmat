@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { alerts } from "@/db/schema";
@@ -17,7 +18,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, alerts: activeList });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }
 
@@ -43,6 +44,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: "عملیات نامعتبر" }, { status: 400 });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }

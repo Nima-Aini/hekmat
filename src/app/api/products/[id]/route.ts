@@ -1,3 +1,6 @@
+import { recordInventoryTransaction } from "@/services/inventory";
+import { apiError, ApiError, assertUuid } from "@/lib/apiError";
+import { productInput, deleteOrArchiveProduct } from "@/services/product";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, productRecipes, rawMaterials, projectProductPrices, projects } from "@/db/schema";
@@ -10,6 +13,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     await requirePermission("products.view");
     const { id } = await params;
+    assertUuid(id);
     const [product] = await db.select().from(products).where(eq(products.id, id)).limit(1);
     if (!product) {
       return NextResponse.json({ success: false, error: "محصول یافت نشد" }, { status: 404 });
@@ -54,7 +58,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       projectPrices,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -62,48 +66,30 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   try {
     await requirePermission("products.update");
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
 
-    const updateData: any = {
-      name: body.name,
-      category: body.category,
-      unit: body.unit,
-      description: body.description !== undefined ? body.description : undefined,
-      imageUrl: body.imageUrl !== undefined ? body.imageUrl : undefined,
-      updatedAt: new Date(),
-    };
-
-    if (body.code) updateData.code = body.code;
-    if (body.basePrice !== undefined) updateData.basePrice = body.basePrice.toString();
-    if (body.stockQuantity !== undefined) updateData.stockQuantity = body.stockQuantity.toString();
-    if (body.minStockQuantity !== undefined) updateData.minStockQuantity = body.minStockQuantity.toString();
-    if (body.status !== undefined) updateData.status = body.status;
-    if (body.isSpecial !== undefined) updateData.isSpecial = !!body.isSpecial;
-
-    const [updated] = await db
-      .update(products)
-      .set(updateData)
-      .where(eq(products.id, id))
-      .returning();
-
-    // If recipes update provided, replace recipe entries
-    if (body.recipes && Array.isArray(body.recipes)) {
-      await db.delete(productRecipes).where(eq(productRecipes.productId, id));
-      for (const recipe of body.recipes) {
-        await db.insert(productRecipes).values({
-          productId: id,
-          rawMaterialId: recipe.rawMaterialId,
-          quantityRequired: recipe.quantityRequired.toString(),
-          wastagePercent: recipe.wastagePercent ? recipe.wastagePercent.toString() : "0",
-        });
+    const { data, recipes } = productInput(body);
+    const updated = await db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(products).where(eq(products.id, id)).for("update").limit(1);
+      if (!existing) throw new ApiError(404, "محصول یافت نشد.");
+      const { stockQuantity, ...details } = data;
+      if (stockQuantity !== undefined && Number(stockQuantity) !== Number(existing.stockQuantity)) {
+        await recordInventoryTransaction({ itemId: id, itemType: "product", transactionType: "adjustment", quantityChange: Number(stockQuantity) - Number(existing.stockQuantity), notes: "ویرایش موجودی محصول" }, tx);
       }
-      await updateProductCostFromBOM(id);
-    }
+      await tx.update(products).set({ ...details, updatedAt: new Date() }).where(eq(products.id, id));
+      if (recipes !== undefined) {
+        await tx.delete(productRecipes).where(eq(productRecipes.productId, id));
+        if (recipes.length) await tx.insert(productRecipes).values(recipes.map(r => ({ ...r, productId: id })));
+        await updateProductCostFromBOM(id, tx);
+      }
+      return (await tx.select().from(products).where(eq(products.id, id)))[0];
+    });
 
     await logAuditEvent("UPDATE", "product", id, { name: updated.name });
     return NextResponse.json({ success: true, product: updated });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }
 
@@ -111,20 +97,12 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   try {
     await requirePermission("products.delete");
     const { id } = await params;
+    assertUuid(id);
 
-    const [existing] = await db.select().from(products).where(eq(products.id, id)).limit(1);
-    if (!existing) {
-      return NextResponse.json({ success: false, error: "محصول یافت نشد." }, { status: 404 });
-    }
-
-    await db.delete(products).where(eq(products.id, id));
-
-    await logAuditEvent("DELETE", "product", id, { code: existing.code, name: existing.name });
-    return NextResponse.json({
-      success: true,
-      message: `محصول «${existing.name}» (${existing.code}) با موفقیت حذف شد.`,
-    });
+    const result = await deleteOrArchiveProduct(id);
+    await logAuditEvent(result.archived ? "ARCHIVE" : "DELETE", "product", id, { code: result.product.code, name: result.product.name });
+    return NextResponse.json({ success: true, archived: result.archived, message: result.message });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return apiError(error);
   }
 }

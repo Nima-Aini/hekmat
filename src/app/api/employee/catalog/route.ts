@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { accounts, employeeProjectAssignments, products, projects } from "@/db/schema";
@@ -14,7 +15,7 @@ export async function GET() {
       .orderBy(products.name);
 
     let projectRows = await db.select().from(projects).where(eq(projects.status, "active")).orderBy(desc(projects.createdAt));
-    if (context) {
+    if (!context.permissions.has("*")) {
       const assignments = await db
         .select({ projectId: employeeProjectAssignments.projectId })
         .from(employeeProjectAssignments)
@@ -24,7 +25,7 @@ export async function GET() {
     }
 
     const accountRows = await db
-      .select({ id: accounts.id, code: accounts.code, name: accounts.name, type: accounts.type, isDefault: accounts.isDefault, balance: accounts.balance })
+      .select({ id: accounts.id, code: accounts.code, name: accounts.name, type: accounts.type, isDefault: accounts.isDefault })
       .from(accounts)
       .orderBy(desc(accounts.isDefault), accounts.name);
 
@@ -32,9 +33,9 @@ export async function GET() {
       success: true,
       products: productRows.map((p) => ({ ...p, basePrice: Number(p.basePrice) })),
       projects: projectRows,
-      accounts: accountRows.map((a) => ({ ...a, balance: Number(a.balance) })),
+      accounts: accountRows,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: error.message?.includes("دسترسی") ? 403 : 500 });
+    return apiError(error);
   }
 }

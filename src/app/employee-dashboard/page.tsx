@@ -1,4 +1,5 @@
 "use client";
+import { retryableRequest } from "@/lib/retryableRequest";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -239,7 +240,7 @@ export default function EmployeeDashboardPage() {
         throw Error("برای ثبت پرداخت اولیه، انتخاب حساب واریزی الزامی است.");
       }
 
-      const x = await fetch("/api/invoices", {
+      const x = await retryableRequest("/api/invoices", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -317,7 +318,7 @@ export default function EmployeeDashboardPage() {
       if (!paymentForm.accountId || !paymentForm.amount || Number(paymentForm.amount) <= 0) {
         throw Error("انتخاب حساب و مبلغ معتبر الزامی است.");
       }
-      const x = await fetch("/api/payments", {
+      const x = await retryableRequest("/api/payments", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -363,7 +364,7 @@ export default function EmployeeDashboardPage() {
     setBusy(true);
     setError("");
     try {
-      const x = await fetch("/api/payments", {
+      const x = await retryableRequest("/api/payments", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

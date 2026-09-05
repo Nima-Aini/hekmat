@@ -266,7 +266,7 @@ export const products = pgTable("products", {
   minStockQuantity: numeric("min_stock_quantity", { precision: 15, scale: 4 }).default("5").notNull(),
   targetStockQuantity: numeric("target_stock_quantity", { precision: 15, scale: 4 }).default("50"),
   commissionRatePercent: numeric("commission_rate_percent", { precision: 5, scale: 2 }).default("5"),
-  status: text("status").default("active").notNull(), // active, inactive
+  status: text("status").default("active").notNull(), // active, inactive, archived
   isSpecial: boolean("is_special").default(false).notNull(),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -416,6 +416,8 @@ export const productionBatchItems = pgTable("production_batch_items", {
 
 // 10. Invoices & Invoice Items
 export const invoices = pgTable("invoices", {
+  requestKey: text("request_key").unique(),
+  requestHash: text("request_hash"),
   id: uuid("id").defaultRandom().primaryKey(),
   invoiceNumber: text("invoice_number").notNull().unique(),
   customerId: uuid("customer_id").notNull().references(() => customers.id),
@@ -447,7 +449,7 @@ export const invoices = pgTable("invoices", {
 export const invoiceItems = pgTable("invoice_items", {
   id: uuid("id").defaultRandom().primaryKey(),
   invoiceId: uuid("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
-  productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+  productId: uuid("product_id").references(() => products.id),
   productNameSnapshot: text("product_name_snapshot").notNull(),
   isCustom: boolean("is_custom").default(false),
   customUnit: text("custom_unit").default("عدد"),
@@ -476,6 +478,8 @@ export const accounts = pgTable("accounts", {
 });
 
 export const payments = pgTable("payments", {
+  requestKey: text("request_key").unique(),
+  requestHash: text("request_hash"),
   id: uuid("id").defaultRandom().primaryKey(),
   paymentNumber: text("payment_number").notNull().unique(),
   customerId: uuid("customer_id").references(() => customers.id),

@@ -1,3 +1,6 @@
+import { getEmployeeContext } from "@/services/access";
+import { ApiError } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
@@ -29,6 +32,7 @@ async function getNeshanKey(providedKey?: string | null): Promise<string> {
 
 export async function GET(req: Request) {
   try {
+    if (!await getEmployeeContext()) throw new ApiError(401, "ابتدا وارد حساب کاربری شوید.");
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action") || "search";
     const customKey = searchParams.get("apiKey");
@@ -111,6 +115,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, error: "عملیات نامعتبر است." }, { status: 400 });
   } catch (error: any) {
     console.error("Neshan API Route error:", error);
-    return NextResponse.json({ success: false, error: error.message || "خطای سرور" }, { status: 500 });
+    return apiError(error);
   }
 }

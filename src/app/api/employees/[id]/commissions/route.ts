@@ -1,3 +1,7 @@
+import { ApiError } from "@/lib/apiError";
+import crypto from "node:crypto";
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { commissionLedger, employees, accounts, expenses, payments } from "@/db/schema";
@@ -8,7 +12,9 @@ import { logAuditEvent } from "@/services/audit";
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    await requirePermission("commissions.view");
+    assertUuid(id);
+    const viewer = await requirePermission("commissions.view");
+    if (!viewer.permissions.has("*") && !viewer.permissions.has("commissions.manage") && viewer.employeeId !== id) throw new ApiError(403, "دسترسی به پورسانت همکار دیگر مجاز نیست.");
 
     const [emp] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
     if (!emp) {
@@ -52,23 +58,25 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       })),
     });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message || "خطا در دریافت پورسانت‌ها" }, { status: 500 });
+    return apiError(e);
   }
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
     await requirePermission("commissions.manage");
 
-    const [emp] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
+    return await db.transaction(async (tx) => {
+    const [emp] = await tx.select().from(employees).where(eq(employees.id, id)).limit(1);
     if (!emp) {
       return NextResponse.json({ success: false, error: "همکار مورد نظر یافت نشد" }, { status: 404 });
     }
 
     const amount = Number(body.amount);
-    if (!amount || amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ success: false, error: "مبلغ پرداختی نامعتبر است و باید بزرگتر از صفر باشد." }, { status: 400 });
     }
 
@@ -76,7 +84,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ success: false, error: "انتخاب حساب بانکی یا صندوق پرداخت الزامی است." }, { status: 400 });
     }
 
-    const [account] = await db.select().from(accounts).where(eq(accounts.id, body.accountId)).limit(1);
+    const [account] = await tx.select().from(accounts).where(eq(accounts.id, body.accountId)).for("update").limit(1);
     if (!account) {
       return NextResponse.json({ success: false, error: "حساب بانکی مورد نظر یافت نشد." }, { status: 404 });
     }
@@ -93,13 +101,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     const newAccBalance = currentAccBalance - amount;
-    const expNum = `EXP-COMM-${Date.now().toString().slice(-6)}`;
-    const payNum = `PAY-COMM-${Date.now().toString().slice(-6)}`;
+    const expNum = `EXP-COMM-${crypto.randomUUID()}`;
+    const payNum = `PAY-COMM-${crypto.randomUUID()}`;
     const refNumber = body.referenceNumber || null;
     const notes = body.notes || `پرداخت پورسانت به ${emp.name}`;
 
     // 1. Deduct money from account balance
-    await db
+    await tx
       .update(accounts)
       .set({
         balance: newAccBalance.toString(),
@@ -107,7 +115,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .where(eq(accounts.id, account.id));
 
     // 2. Record Expense in expenses table
-    const [createdExpense] = await db
+    const [createdExpense] = await tx
       .insert(expenses)
       .values({
         expenseNumber: expNum,
@@ -123,7 +131,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .returning();
 
     // 3. Record Payment in payments table
-    const [createdPayment] = await db
+    const [createdPayment] = await tx
       .insert(payments)
       .values({
         paymentNumber: payNum,
@@ -138,7 +146,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .returning();
 
     // 4. Record in Commission Ledger as a Payout entry
-    const [createdLedger] = await db
+    const [createdLedger] = await tx
       .insert(commissionLedger)
       .values({
         employeeId: emp.id,
@@ -177,7 +185,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       payment: createdPayment,
       ledger: createdLedger,
     });
+    });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message || "خطا در ثبت پرداخت پورسانت" }, { status: 500 });
+    return apiError(e);
   }
 }

@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { projects, employeeProjectAssignments, employees } from "@/db/schema";
@@ -10,9 +12,8 @@ export const dynamic = "force-dynamic";
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    try {
-      await requirePermission("projects.view", id);
-    } catch {}
+    assertUuid(id);
+    await requirePermission("projects.view", id);
     const [p] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
     if (!p) return NextResponse.json({ success: false, error: "پروژه پیدا نشد" }, { status: 404 });
     const members = await db
@@ -22,16 +23,15 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       .where(eq(employeeProjectAssignments.projectId, id));
     return NextResponse.json({ success: true, project: p, members });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    return apiError(e);
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    try {
-      await requirePermission("projects.update", id);
-    } catch {}
+    assertUuid(id);
+    await requirePermission("projects.update", id);
     const body = await req.json();
     const [p] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
     if (!p) return NextResponse.json({ success: false, error: "پروژه پیدا نشد" }, { status: 404 });
@@ -75,16 +75,15 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     await logAuditEvent("UPDATE", "project", id, { before: p, after: updated });
     return NextResponse.json({ success: true, project: updated, message: "اطلاعات پروژه با موفقیت بروزرسانی شد." });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    return apiError(e);
   }
 }
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    try {
-      await requirePermission("projects.archive", id);
-    } catch {}
+    assertUuid(id);
+    await requirePermission("projects.archive", id);
     const [p] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
     if (!p) return NextResponse.json({ success: false, error: "پروژه پیدا نشد" }, { status: 404 });
     const [updated] = await db
@@ -95,7 +94,7 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     await logAuditEvent("DELETE", "project", id, { before: p, after: updated, reason: "archive_not_hard_delete" });
     return NextResponse.json({ success: true, project: updated, message: "پروژه با موفقیت آرشیو شد." });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    return apiError(e);
   }
 }
 

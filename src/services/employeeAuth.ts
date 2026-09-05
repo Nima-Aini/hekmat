@@ -40,6 +40,7 @@ export function signSession(employeeId: string) {
 }
 
 export function verifySession(token: string): string | null {
+  if (token.split(".").length !== 2) return null;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
   const expected = crypto.createHmac("sha256", secret()).update(payload).digest("base64url");
@@ -48,7 +49,7 @@ export function verifySession(token: string): string | null {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const [id, ts] = Buffer.from(payload, "base64url").toString("utf8").split(".");
-    if (!id || !ts) return null;
+    if (!id || !/^[0-9a-f-]{36}$/i.test(id) || !ts || !Number.isFinite(Number(ts))) return null;
     const tokenAge = Date.now() - Number(ts);
     if (tokenAge > 12 * 60 * 60 * 1000 || tokenAge < 0) return null;
     return id;

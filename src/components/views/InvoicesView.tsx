@@ -1,4 +1,5 @@
 "use client";
+import { retryableRequest } from "@/lib/retryableRequest";
 
 import React, { useEffect, useState, useRef } from "react";
 import { NeonBadge } from "@/components/ui/NeonBadge";
@@ -49,6 +50,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
   const [invoices, setInvoices] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
+  const createRequest = useRef<{ payload: string; key: string } | null>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
@@ -399,13 +401,16 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         };
       }
 
+      const serialized = JSON.stringify(payload);
+      if (!createRequest.current || createRequest.current.payload !== serialized) createRequest.current = { payload: serialized, key: crypto.randomUUID() };
       const res = await fetch("/api/invoices", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": createRequest.current!.key },
         body: JSON.stringify(payload),
       }).then((r) => r.json());
 
       if (res.success) {
+        createRequest.current = null;
         setIsAddModalOpen(false);
         await fetchData();
       } else {
@@ -620,7 +625,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/payments", {
+      const res = await retryableRequest("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

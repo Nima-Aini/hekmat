@@ -1,3 +1,4 @@
+import type { Transaction } from "./product";
 import { db } from "@/db";
 import { customers, customerHealthLogs, invoices, alerts } from "@/db/schema";
 import { eq, desc, and, sql } from "drizzle-orm";
@@ -14,18 +15,18 @@ export interface HealthBreakdown {
 /**
  * Recalculates health score for a customer and logs change if status/score changed.
  */
-export async function recalculateCustomerHealth(customerId: string): Promise<{
+export async function recalculateCustomerHealth(customerId: string, client: Transaction | typeof db = db): Promise<{
   score: number;
   status: "green" | "yellow" | "red";
   breakdown: HealthBreakdown;
 }> {
-  const [customer] = await db.select().from(customers).where(eq(customers.id, customerId)).limit(1);
+  const [customer] = await client.select().from(customers).where(eq(customers.id, customerId)).limit(1);
   if (!customer) throw new Error("مشتری یافت نشد");
 
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-  const customerInvoices = await db
+  const customerInvoices = await client
     .select()
     .from(invoices)
     .where(and(
@@ -110,7 +111,7 @@ export async function recalculateCustomerHealth(customerId: string): Promise<{
   };
 
   // Update customer record
-  await db
+  await client
     .update(customers)
     .set({
       healthScore: totalScore,
@@ -121,7 +122,7 @@ export async function recalculateCustomerHealth(customerId: string): Promise<{
 
   // If score or status changed, log health log & create alert if health degraded
   if (oldScore !== totalScore || oldStatus !== newStatus) {
-    await db.insert(customerHealthLogs).values({
+    await client.insert(customerHealthLogs).values({
       customerId,
       previousScore: oldScore,
       newScore: totalScore,
@@ -132,7 +133,7 @@ export async function recalculateCustomerHealth(customerId: string): Promise<{
     });
 
     if (newStatus === "red" || (oldStatus === "green" && newStatus === "yellow")) {
-      await db.insert(alerts).values({
+      await client.insert(alerts).values({
         type: "health_red",
         severity: newStatus === "red" ? "critical" : "warning",
         title: `افت سلامت مشتری: ${customer.name}`,

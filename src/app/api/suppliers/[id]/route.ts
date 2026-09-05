@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { suppliers } from "@/db/schema";
@@ -9,6 +11,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   try {
     await requirePermission("suppliers.update");
     const { id } = await params;
+    assertUuid(id);
     const body = await req.json();
     const [before] = await db.select().from(suppliers).where(eq(suppliers.id, id)).limit(1);
     if (!before) return NextResponse.json({ success: false, error: "تامین‌کننده پیدا نشد" }, { status: 404 });
@@ -19,5 +22,5 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }).where(eq(suppliers.id, id)).returning();
     await logAuditEvent("UPDATE", "supplier", id, { before, after: updated });
     return NextResponse.json({ success: true, supplier: updated });
-  } catch (e: any) { return NextResponse.json({ success: false, error: e.message }, { status: 500 }); }
+  } catch (e: any) { return apiError(e); }
 }

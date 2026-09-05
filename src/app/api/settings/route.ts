@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
@@ -36,7 +37,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, settings: safeSettings });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }
 
@@ -102,6 +103,6 @@ export async function PUT(req: Request) {
     return NextResponse.json({ success: true, settings: safeResponse });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return apiError(error);
   }
 }

@@ -1,3 +1,5 @@
+import { assertUuid } from "@/lib/apiError";
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/services/access";
 import { db } from "@/db";
@@ -10,6 +12,7 @@ const FORBIDDEN_ROLE_ESCALATION = ["admin"];
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     await requirePermission("employees.view");
     const [employee] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
     if (!employee) return NextResponse.json({ success: false, error: "همکار پیدا نشد" }, { status: 404 });
@@ -20,13 +23,14 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       .where(eq(employeeProjectAssignments.employeeId, id));
     return NextResponse.json({ success: true, employee, projects: memberships });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    return apiError(e);
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    assertUuid(id);
     await requirePermission("employees.manage");
     const body = await req.json();
     const [before] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
@@ -63,6 +67,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     await logAuditEvent("UPDATE", "employee", id, { before, after: updated });
     return NextResponse.json({ success: true, employee: updated });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    return apiError(e);
   }
 }

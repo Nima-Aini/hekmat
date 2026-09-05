@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { projects, employeeProjectAssignments } from "@/db/schema";
@@ -9,11 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    try {
-      await requirePermission("projects.view");
-    } catch (e: any) {
-      console.warn("requirePermission notice in GET /api/projects:", e?.message);
-    }
+    await requirePermission("projects.view");
     let list = await db.select().from(projects).orderBy(desc(projects.createdAt));
     const scope = await getScopedProjectIds();
     const context = await getEmployeeContext();
@@ -23,18 +20,13 @@ export async function GET() {
     return NextResponse.json({ success: true, projects: list });
   } catch (error: any) {
     console.error("GET /api/projects error:", error);
-    return NextResponse.json({ success: false, error: error?.message || "خطا در دریافت پروژه‌ها" }, { status: 500 });
+    return apiError(error);
   }
 }
 
 export async function POST(req: Request) {
   try {
-    let context: any = null;
-    try {
-      context = await requirePermission("projects.create");
-    } catch (e: any) {
-      console.warn("requirePermission notice in POST /api/projects:", e?.message);
-    }
+    const context = await requirePermission("projects.create");
 
     const body = await req.json();
     const name = body.name?.trim();
@@ -72,9 +64,8 @@ export async function POST(req: Request) {
         ? body.managerEmployeeId.trim()
         : null;
 
-    const [created] = await db
-      .insert(projects)
-      .values({
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx.insert(projects).values({
         code,
         name,
         label: body.label?.trim() || null,
@@ -90,45 +81,40 @@ export async function POST(req: Request) {
         targetProfit: body.targetProfit != null ? String(body.targetProfit) : "0",
         targetCollection: body.targetCollection != null ? String(body.targetCollection) : "0",
         independentSalesAllowed: body.independentSalesAllowed === true,
-      })
-      .returning();
+      }).returning();
 
     // If a manager or creator employee is set, auto-assign them to this project
     if (managerId) {
-      try {
-        await db
+        await tx
           .insert(employeeProjectAssignments)
           .values({
             employeeId: managerId,
-            projectId: created.id,
+            projectId: row.id,
             role: "manager",
             status: "active",
             permissionSet: { "*": true },
           })
           .onConflictDoNothing();
-      } catch {}
     }
     if (context?.employeeId && context.employeeId !== managerId) {
-      try {
-        await db
+        await tx
           .insert(employeeProjectAssignments)
           .values({
             employeeId: context.employeeId,
-            projectId: created.id,
+            projectId: row.id,
             role: "member",
             status: "active",
             permissionSet: { "*": true },
           })
           .onConflictDoNothing();
-      } catch {}
     }
 
-    try {
-      await logAuditEvent("CREATE", "project", created.id, {
-        code: created.code,
-        name: created.name,
-      }, { userId: context?.employeeId || "system", userName: context?.roleCode || "کاربر سیستم" });
-    } catch {}
+      await logAuditEvent("CREATE", "project", row.id, {
+        code: row.code,
+        name: row.name,
+      }, { userId: context.employeeId, userName: context.roleCode || "کاربر سیستم" }, tx);
+      return row;
+    });
 
     return NextResponse.json({
       success: true,
@@ -137,7 +123,6 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("POST /api/projects error:", error);
-    return NextResponse.json({ success: false, error: error?.message || "خطا در ثبت پروژه" }, { status: 500 });
+    return apiError(error);
   }
 }
-
