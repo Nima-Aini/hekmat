@@ -19,11 +19,11 @@ vi.mock("@/services/access", async () => {
 });
 import * as schema from "../src/db/schema";
 import { migrateDatabase } from "../src/db/migrate";
-import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, invoices, invoiceItems, productionBatches, commissionRules, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers } from "../src/db/schema";
+import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, invoices, invoiceItems, productionBatches, commissionRules, commissionLedger, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers, accounts, payments, paymentAllocations, employees, alerts } from "../src/db/schema";
 import { DELETE, PUT } from "../src/app/api/products/[id]/route";
 import { POST, GET } from "../src/app/api/products/route";
 import { DELETE as deleteSpecial } from "../src/app/api/special-products/[id]/route";
-import { createInvoice, reverseInvoice, updateInvoice } from "../src/services/invoice";
+import { createInvoice, deleteInvoice, reverseInvoice, updateInvoice } from "../src/services/invoice";
 import { productInput } from "../src/services/product";
 const pg = new PGlite();
 const database = drizzle(pg);
@@ -145,6 +145,65 @@ describe("Production product lifecycle against PostgreSQL", () => {
     await expect(reverseInvoice(first.id, "تکرار")).rejects.toThrow();
     expect(Number((await database.select().from(products).where(eq(products.id, p.id)))[0].stockQuantity)).toBe(10);
     await expect(updateInvoice(first.id, { invoiceDiscount: 20 })).rejects.toThrow();
+  });
+  it("permanently deletes an issued invoice while preserving real payments", async () => {
+    const p = await create();
+    await database.update(products).set({ stockQuantity: "10" }).where(eq(products.id, p.id));
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری حذف", mobile: "09120000001" }).returning();
+    const [employee] = await database.insert(employees).values({ code: randomUUID(), name: "فروشنده حذف", mobile: "09120000002" }).returning();
+    const [account] = await database.insert(accounts).values({ code: randomUUID(), name: "صندوق تست", type: "cash" }).returning();
+    const invoice = await createInvoice({
+      customerId: customer.id,
+      employeeId: employee.id,
+      items: [{ productId: p.id, quantity: 2, unitPrice: 100 }],
+      initialPayment: { amount: 50, accountId: account.id, paymentMethod: "cash" },
+    });
+    await database.update(customers).set({ healthScore: 85, healthStatus: "green" }).where(eq(customers.id, customer.id));
+    await database.insert(alerts).values({ type: "health_red", title: "قبلی", message: "قبلی", entityType: "customer", entityId: customer.id, dedupKey: `health_${customer.id}_red` });
+
+    // These production FKs reproduce why a direct invoice DELETE is unsafe.
+    await expect(database.delete(invoices).where(eq(invoices.id, invoice.id))).rejects.toThrow();
+    expect(Number((await database.select().from(products).where(eq(products.id, p.id)))[0].stockQuantity)).toBe(8);
+    expect(Number((await database.select().from(accounts).where(eq(accounts.id, account.id)))[0].balance)).toBe(50);
+
+    await deleteInvoice(invoice.id, "تست حذف دائم");
+    expect(await database.select().from(invoices).where(eq(invoices.id, invoice.id))).toHaveLength(0);
+    expect(await database.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id))).toHaveLength(0);
+    expect(await database.select().from(paymentAllocations).where(eq(paymentAllocations.invoiceId, invoice.id))).toHaveLength(0);
+    expect(Number((await database.select().from(products).where(eq(products.id, p.id)))[0].stockQuantity)).toBe(10);
+    expect(Number((await database.select().from(accounts).where(eq(accounts.id, account.id)))[0].balance)).toBe(50);
+    const [payment] = await database.select().from(payments).where(eq(payments.customerId, customer.id));
+    expect(payment.status).toBe("completed");
+    expect(payment.invoiceId).toBeNull();
+    expect(await database.select().from(commissionLedger).where(eq(commissionLedger.invoiceId, invoice.id))).toHaveLength(0);
+    expect(await database.select().from(inventoryLedger).where(eq(inventoryLedger.referenceId, invoice.id))).toHaveLength(0);
+  });
+  it("does not reverse stock or account balances twice after invoice reversal", async () => {
+    const p = await create();
+    await database.update(products).set({ stockQuantity: "10" }).where(eq(products.id, p.id));
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری ابطال", mobile: "09120000003" }).returning();
+    const [account] = await database.insert(accounts).values({ code: randomUUID(), name: "بانک تست", type: "bank" }).returning();
+    const invoice = await createInvoice({ customerId: customer.id, items: [{ productId: p.id, quantity: 2, unitPrice: 100 }], initialPayment: { amount: 50, accountId: account.id, paymentMethod: "cash" } });
+    await reverseInvoice(invoice.id, "ابطال پیش از حذف");
+    const balanceAfterReverse = Number((await database.select().from(accounts).where(eq(accounts.id, account.id)))[0].balance);
+    await deleteInvoice(invoice.id, "حذف فاکتور باطل‌شده");
+    expect(Number((await database.select().from(products).where(eq(products.id, p.id)))[0].stockQuantity)).toBe(10);
+    expect(Number((await database.select().from(accounts).where(eq(accounts.id, account.id)))[0].balance)).toBe(balanceAfterReverse);
+    const [payment] = await database.select().from(payments).where(eq(payments.customerId, customer.id));
+    expect(payment.status).toBe("cancelled");
+    expect(payment.invoiceId).toBeNull();
+  });
+  it("retains paid commission history detached and reversed", async () => {
+    const p = await create();
+    await database.update(products).set({ stockQuantity: "5" }).where(eq(products.id, p.id));
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری پورسانت", mobile: "09120000004" }).returning();
+    const [employee] = await database.insert(employees).values({ code: randomUUID(), name: "فروشنده پورسانت", mobile: "09120000005" }).returning();
+    const invoice = await createInvoice({ customerId: customer.id, employeeId: employee.id, items: [{ productId: p.id, quantity: 1, unitPrice: 100 }] });
+    const [commission] = await database.update(commissionLedger).set({ status: "paid" }).where(eq(commissionLedger.invoiceId, invoice.id)).returning();
+    await deleteInvoice(invoice.id);
+    const [retained] = await database.select().from(commissionLedger).where(eq(commissionLedger.id, commission.id));
+    expect(retained.invoiceId).toBeNull();
+    expect(retained.status).toBe("reversed");
   });
   it("returns 400/404/401/403 without raw database errors", async () => {
     expect((await DELETE(new Request("http://localhost"), params("bad"))).status).toBe(400);
