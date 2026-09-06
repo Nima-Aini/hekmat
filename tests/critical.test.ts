@@ -6,6 +6,9 @@
 import { describe, it, expect } from "vitest";
 import { parseJalaliString, gregorianToJalali, jalaliToGregorian, toJalaliDate } from "../src/lib/dateUtils";
 import { apiError } from "../src/lib/apiError";
+import { displayMoneyValue, formatThousands, normalizeDigits, parseFormattedNumber } from "../src/components/ui/MoneyInput";
+import { getNeshanCoordinates } from "../src/components/maps/NeshanMapPicker";
+import { getAlertNavigation } from "../src/components/views/AlertsView";
 
 describe("Jalali Date System", () => {
   it("gregorianToJalali converts known date", () => {
@@ -32,6 +35,23 @@ describe("Jalali Date System", () => {
 });
 
 describe("Validation helpers", () => {
+  it("keeps zero visually empty and normalizes Persian money input", () => {
+    expect(displayMoneyValue(0)).toBe("");
+    expect(displayMoneyValue("0")).toBe("");
+    expect(normalizeDigits("۱۲۳٤")).toBe("1234");
+    expect(formatThousands("۱۲۳۴۵۶۷")).toBe("1,234,567");
+    expect(parseFormattedNumber("۱,۲۳۴")).toBe(1234);
+  });
+  it("reads Neshan x/y coordinates without swapping them", () => {
+    expect(getNeshanCoordinates({ location: { x: 51.389, y: 35.6892 } })).toEqual({ lat: 35.6892, lng: 51.389 });
+    expect(getNeshanCoordinates({ latitude: 35.7, longitude: 51.4 })).toEqual({ lat: 35.7, lng: 51.4 });
+    expect(getNeshanCoordinates({ location: {} })).toBeNull();
+  });
+  it("routes an invoice alert to its exact invoice", () => {
+    expect(getAlertNavigation({ entityType: "invoice", entityId: "invoice-123" }))
+      .toEqual({ tab: "invoices", type: "invoice", id: "invoice-123" });
+    expect(getAlertNavigation({ entityType: "unknown", entityId: "1" })).toBeNull();
+  });
   it("distinguishes nested foreign-key and unique PostgreSQL errors", async () => {
     const originalError = console.error;
     console.error = () => undefined;

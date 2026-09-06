@@ -5,7 +5,16 @@ import { NeonBadge } from "@/components/ui/NeonBadge";
 import { AlertTriangle, CheckCircle, RefreshCw, Filter } from "lucide-react";
 import { toJalaliDate } from "@/lib/dateUtils";
 
-export const AlertsView: React.FC<{ selectedProjectId: string | null }> = ({ selectedProjectId }) => {
+export function getAlertNavigation(alert: { entityType?: string | null; entityId?: string | null }) {
+  const tabByType: Record<string, string> = {
+    invoice: "invoices", raw_material: "raw_materials", product: "products",
+    customer: "customers", employee: "employees", project: "projects",
+  };
+  if (!alert.entityType || !alert.entityId || !tabByType[alert.entityType]) return null;
+  return { tab: tabByType[alert.entityType], type: alert.entityType, id: alert.entityId };
+}
+
+export const AlertsView: React.FC<{ selectedProjectId: string | null; onNavigate?: (tab: string) => void }> = ({ selectedProjectId, onNavigate }) => {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,7 +35,8 @@ export const AlertsView: React.FC<{ selectedProjectId: string | null }> = ({ sel
     fetchAlerts();
   }, [selectedProjectId]);
 
-  const handleResolve = async (alertId: string) => {
+  const handleResolve = async (event: React.MouseEvent, alertId: string) => {
+    event.stopPropagation();
     try {
       const res = await fetch("/api/alerts", {
         method: "POST",
@@ -40,6 +50,15 @@ export const AlertsView: React.FC<{ selectedProjectId: string | null }> = ({ sel
     } catch (err) {
       console.error("Resolve error:", err);
     }
+  };
+
+  const handleAlertClick = (alert: any) => {
+    const navigation = getAlertNavigation(alert);
+    if (!navigation) return;
+    onNavigate?.(navigation.tab);
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("akma:navigate-item", {
+      detail: { type: navigation.type, id: navigation.id },
+    })), 50);
   };
 
   return (
@@ -65,7 +84,8 @@ export const AlertsView: React.FC<{ selectedProjectId: string | null }> = ({ sel
           alerts.map((a) => (
             <div
               key={a.id}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl flex items-start justify-between gap-4"
+              onClick={() => handleAlertClick(a)}
+              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl flex items-start justify-between gap-4 cursor-pointer hover:border-purple-500/50"
             >
               <div className="flex items-start gap-3">
                 <AlertTriangle
@@ -87,7 +107,7 @@ export const AlertsView: React.FC<{ selectedProjectId: string | null }> = ({ sel
 
               {a.status !== "resolved" ? (
                 <button
-                  onClick={() => handleResolve(a.id)}
+                  onClick={(event) => handleResolve(event, a.id)}
                   className="flex items-center gap-1.5 rounded-xl bg-emerald-600/20 border border-emerald-500/30 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-600/30 transition-all shrink-0"
                 >
                   <CheckCircle className="h-3.5 w-3.5" />

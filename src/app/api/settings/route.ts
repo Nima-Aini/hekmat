@@ -15,7 +15,7 @@ export async function GET(req: Request) {
       ? {
           ...settings,
           openaiApiKey: settings.openaiApiKey ? "••••••••" : "",
-          neshanApiKey: settings.neshanApiKey || "service.3a9a6b9c59054a20a4786affab22c5d7",
+          neshanApiKey: settings.neshanApiKey ? "••••••••" : "",
         }
       : {
           businessName: "سازمان و کسب‌وکار حکمت آکما",
@@ -31,7 +31,7 @@ export async function GET(req: Request) {
           currency: "تومان",
           aiEnabled: true,
           mapProvider: "neshan",
-          neshanApiKey: "service.3a9a6b9c59054a20a4786affab22c5d7",
+          neshanApiKey: "",
         };
 
     return NextResponse.json({ success: true, settings: safeSettings });
@@ -78,12 +78,14 @@ export async function PUT(req: Request) {
       openaiModel: body.openaiModel || "gemini-2.5-flash",
       aiEnabled: body.aiEnabled !== undefined ? body.aiEnabled : true,
       mapProvider: body.mapProvider || "neshan",
-      neshanApiKey: body.neshanApiKey,
       updatedAt: new Date(),
     };
 
     if (body.openaiApiKey !== undefined && body.openaiApiKey !== "••••••••" && body.openaiApiKey !== "") {
       updateData.openaiApiKey = body.openaiApiKey;
+    }
+    if (body.neshanApiKey !== undefined && body.neshanApiKey !== "••••••••" && body.neshanApiKey !== "") {
+      updateData.neshanApiKey = body.neshanApiKey;
     }
 
     const [updated] = await db
@@ -99,7 +101,11 @@ export async function PUT(req: Request) {
       businessName: updated.businessName,
     }, { userId: context.employeeId, userName: context.roleCode });
 
-    const safeResponse = { ...updated, openaiApiKey: updated.openaiApiKey ? "••••••••" : "" };
+    const safeResponse = {
+      ...updated,
+      openaiApiKey: updated.openaiApiKey ? "••••••••" : "",
+      neshanApiKey: updated.neshanApiKey ? "••••••••" : "",
+    };
     return NextResponse.json({ success: true, settings: safeResponse });
   } catch (error: any) {
     const status = error.message?.includes("دسترسی") ? 403 : 500;

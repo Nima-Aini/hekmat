@@ -1,64 +1,93 @@
-import { ApiError } from "@/lib/apiError";
 import crypto from "node:crypto";
-import { assertUuid } from "@/lib/apiError";
-import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
-import { commissionLedger, employees, accounts, expenses, payments } from "@/db/schema";
-import { desc, eq, and, sql, or } from "drizzle-orm";
+import { accounts, commissionLedger, customers, employees, expenses, invoices, payments, projects } from "@/db/schema";
+import { ApiError, apiError, assertUuid } from "@/lib/apiError";
 import { requirePermission } from "@/services/access";
 import { logAuditEvent } from "@/services/audit";
+
+const eligibleStatuses = new Set(["calculated", "pending", "payable"]);
+type CommissionRow = typeof commissionLedger.$inferSelect;
+
+function legacyCoveredCommissionIds(rows: CommissionRow[]) {
+  let remaining = rows.reduce((sum, row) => {
+    const amount = Number(row.commissionAmount) || 0;
+    return row.commissionType === "payout" || amount < 0 ? sum + Math.abs(amount) : sum;
+  }, 0);
+  const covered = new Set<string>();
+  const oldestFirst = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  for (const row of oldestFirst) {
+    const amount = Number(row.commissionAmount) || 0;
+    if (remaining <= 0) break;
+    if (amount <= 0 || row.commissionType === "payout" || row.status === "reversed" || row.status === "paid" || row.paymentId) continue;
+    covered.add(row.id);
+    remaining -= Math.min(remaining, amount);
+  }
+  return covered;
+}
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     assertUuid(id);
     const viewer = await requirePermission("commissions.view");
-    if (!viewer.permissions.has("*") && !viewer.permissions.has("commissions.manage") && viewer.employeeId !== id) throw new ApiError(403, "دسترسی به پورسانت همکار دیگر مجاز نیست.");
-
-    const [emp] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
-    if (!emp) {
-      return NextResponse.json({ success: false, error: "همکار مورد نظر یافت نشد" }, { status: 404 });
+    if (!viewer.permissions.has("*") && !viewer.permissions.has("commissions.manage") && viewer.employeeId !== id) {
+      throw new ApiError(403, "دسترسی به پورسانت همکار دیگر مجاز نیست.");
     }
+    const [emp] = await db.select().from(employees).where(eq(employees.id, id)).limit(1);
+    if (!emp) throw new ApiError(404, "همکار مورد نظر یافت نشد");
 
-    const commissions = await db
-      .select()
-      .from(commissionLedger)
+    const rows = await db.select({
+      commission: commissionLedger,
+      invoiceNumber: invoices.invoiceNumber,
+      invoiceDate: invoices.invoiceDate,
+      invoiceTotal: invoices.grandTotal,
+      storeName: customers.storeName,
+      customerName: customers.name,
+      projectName: projects.name,
+      paymentNumber: payments.paymentNumber,
+      paymentDate: payments.paymentDate,
+    }).from(commissionLedger)
+      .leftJoin(invoices, eq(commissionLedger.invoiceId, invoices.id))
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .leftJoin(projects, eq(commissionLedger.projectId, projects.id))
+      .leftJoin(payments, eq(commissionLedger.paymentId, payments.id))
       .where(or(eq(commissionLedger.employeeId, id), eq(commissionLedger.recipientEmployeeId, id)))
       .orderBy(desc(commissionLedger.createdAt));
 
-    let totalEarned = 0;
-    let totalPaid = 0;
-
-    for (const c of commissions) {
-      const amt = Number(c.commissionAmount) || 0;
-      if (c.commissionType === "payout" || amt < 0) {
-        totalPaid += Math.abs(amt);
-      } else if (c.status !== "reversed") {
-        totalEarned += amt;
+    const ledgerRows = rows.map((row) => row.commission);
+    const legacyCovered = legacyCoveredCommissionIds(ledgerRows);
+    let totalEarned = 0, legacyPaid = 0, selectedRowsPaid = 0;
+    const commissions = rows.map(({ commission, ...details }) => {
+      const amount = Number(commission.commissionAmount) || 0;
+      const isLegacyPayout = commission.commissionType === "payout" || amount < 0;
+      if (isLegacyPayout) legacyPaid += Math.abs(amount);
+      else if (commission.status !== "reversed") {
+        totalEarned += amount;
+        if (commission.status === "paid" || commission.paymentId) selectedRowsPaid += amount;
       }
-    }
+      return {
+        ...commission,
+        ...details,
+        storeName: details.storeName || details.customerName || null,
+        legacyCovered: legacyCovered.has(commission.id),
+        eligibleForPayout: !legacyCovered.has(commission.id) && !isLegacyPayout && amount > 0 && !commission.paymentId && eligibleStatuses.has(commission.status),
+      };
+    });
 
+    const totalPaid = legacyPaid + selectedRowsPaid;
     const balancePending = Math.max(0, totalEarned - totalPaid);
-
-    const availableAccounts = await db.select().from(accounts);
-
+    const availableAccounts = await db.select().from(accounts).where(eq(accounts.status, "active"));
     return NextResponse.json({
       success: true,
       employee: emp,
       commissions,
-      summary: {
-        totalEarned,
-        totalPaid,
-        balancePending,
-      },
-      accounts: availableAccounts.map((a) => ({
-        ...a,
-        balance: Number(a.balance),
-      })),
+      summary: { totalEarned, totalPaid, balancePending },
+      accounts: availableAccounts.map((account) => ({ ...account, balance: Number(account.balance) })),
     });
-  } catch (e: any) {
-    return apiError(e);
+  } catch (error) {
+    return apiError(error);
   }
 }
 
@@ -66,127 +95,84 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const { id } = await params;
     assertUuid(id);
-    const body = await req.json();
     await requirePermission("commissions.manage");
+    const body = await req.json();
+    const commissionIds: string[] = Array.from(new Set<string>(Array.isArray(body.commissionIds) ? body.commissionIds.map(String) : []));
+    if (commissionIds.length === 0) throw new ApiError(400, "حداقل یک پورسانت قابل پرداخت را انتخاب کنید.");
+    if (commissionIds.length > 500) throw new ApiError(400, "حداکثر ۵۰۰ پورسانت را می‌توان در یک پرداخت تسویه کرد.");
+    commissionIds.forEach(assertUuid);
+    if (!body.accountId) throw new ApiError(400, "انتخاب حساب بانکی یا صندوق پرداخت الزامی است.");
+    assertUuid(String(body.accountId));
+    const allowedMethods = new Set(["bank_transfer", "card_transfer", "pos", "cash", "cheque"]);
+    if (body.paymentMethod && !allowedMethods.has(body.paymentMethod)) throw new ApiError(400, "روش پرداخت نامعتبر است.");
 
-    return await db.transaction(async (tx) => {
-    const [emp] = await tx.select().from(employees).where(eq(employees.id, id)).limit(1);
-    if (!emp) {
-      return NextResponse.json({ success: false, error: "همکار مورد نظر یافت نشد" }, { status: 404 });
-    }
+    const result = await db.transaction(async (tx) => {
+      const [emp] = await tx.select().from(employees).where(eq(employees.id, id)).limit(1);
+      if (!emp) throw new ApiError(404, "همکار مورد نظر یافت نشد");
+      const employeeLedger = await tx.select().from(commissionLedger)
+        .where(or(eq(commissionLedger.employeeId, id), eq(commissionLedger.recipientEmployeeId, id)))
+        .for("update");
+      const selected = employeeLedger.filter((row) => commissionIds.includes(row.id));
+      if (selected.length !== commissionIds.length) throw new ApiError(404, "یک یا چند پورسانت انتخاب‌شده یافت نشد.");
+      const legacyCovered = legacyCoveredCommissionIds(employeeLedger);
+      for (const row of selected) {
+        const amount = Number(row.commissionAmount);
+        if (
+          (row.employeeId !== id && row.recipientEmployeeId !== id) ||
+          row.commissionType === "payout" ||
+          row.status === "reversed" ||
+          row.status === "paid" ||
+          Boolean(row.paymentId) ||
+          legacyCovered.has(row.id) ||
+          !eligibleStatuses.has(row.status) ||
+          !Number.isFinite(amount) ||
+          amount <= 0
+        ) throw new ApiError(409, "یک یا چند پورسانت انتخاب‌شده قبلاً پرداخت شده یا قابل پرداخت نیست.");
+      }
 
-    const amount = Number(body.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return NextResponse.json({ success: false, error: "مبلغ پرداختی نامعتبر است و باید بزرگتر از صفر باشد." }, { status: 400 });
-    }
+      const amount = selected.reduce((sum, row) => sum + Number(row.commissionAmount), 0);
+      const [account] = await tx.select().from(accounts)
+        .where(and(eq(accounts.id, body.accountId), eq(accounts.status, "active"))).for("update").limit(1);
+      if (!account) throw new ApiError(404, "حساب فعال مورد نظر یافت نشد.");
+      const currentBalance = Number(account.balance) || 0;
+      if (currentBalance < amount) throw new ApiError(400, `موجودی حساب «${account.name}» برای این پرداخت کافی نیست.`);
 
-    if (!body.accountId) {
-      return NextResponse.json({ success: false, error: "انتخاب حساب بانکی یا صندوق پرداخت الزامی است." }, { status: 400 });
-    }
+      const paymentDate = body.paymentDate ? new Date(body.paymentDate) : new Date();
+      if (Number.isNaN(paymentDate.getTime())) throw new ApiError(400, "تاریخ پرداخت نامعتبر است.");
+      const expenseNumber = `EXP-COMM-${crypto.randomUUID()}`;
+      const paymentNumber = `PAY-COMM-${crypto.randomUUID()}`;
+      const referenceNumber = body.referenceNumber?.trim() || null;
+      const notes = body.notes?.trim() || `پرداخت پورسانت ${selected.length} فروش به ${emp.name}`;
 
-    const [account] = await tx.select().from(accounts).where(eq(accounts.id, body.accountId)).for("update").limit(1);
-    if (!account) {
-      return NextResponse.json({ success: false, error: "حساب بانکی مورد نظر یافت نشد." }, { status: 404 });
-    }
-
-    const currentAccBalance = Number(account.balance) || 0;
-    if (currentAccBalance < amount) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `موجودی حساب "${account.name}" کافی نیست. موجودی فعلی: ${currentAccBalance.toLocaleString("fa-IR")} تومان، مبلغ پرداختی: ${amount.toLocaleString("fa-IR")} تومان. موجودی حساب‌ها نمی‌تواند منفی شود.`,
-        },
-        { status: 400 }
-      );
-    }
-
-    const newAccBalance = currentAccBalance - amount;
-    const expNum = `EXP-COMM-${crypto.randomUUID()}`;
-    const payNum = `PAY-COMM-${crypto.randomUUID()}`;
-    const refNumber = body.referenceNumber || null;
-    const notes = body.notes || `پرداخت پورسانت به ${emp.name}`;
-
-    // 1. Deduct money from account balance
-    await tx
-      .update(accounts)
-      .set({
-        balance: newAccBalance.toString(),
-      })
-      .where(eq(accounts.id, account.id));
-
-    // 2. Record Expense in expenses table
-    const [createdExpense] = await tx
-      .insert(expenses)
-      .values({
-        expenseNumber: expNum,
-        category: "commission",
-        amount: amount.toString(),
-        employeeId: emp.id,
-        accountId: account.id,
-        projectId: body.projectId || null,
+      await tx.update(accounts).set({ balance: (currentBalance - amount).toString() }).where(eq(accounts.id, account.id));
+      const [payment] = await tx.insert(payments).values({
+        paymentNumber, accountId: account.id, amount: amount.toString(),
+        paymentType: "commission_payout", paymentMethod: body.paymentMethod || "bank_transfer",
+        paymentDate, referenceNumber, notes, status: "completed",
+      }).returning();
+      const projectIds = Array.from(new Set(selected.map((row) => row.projectId).filter((value): value is string => Boolean(value))));
+      const [expense] = await tx.insert(expenses).values({
+        expenseNumber, category: "commission", amount: amount.toString(), employeeId: emp.id,
+        accountId: account.id, projectId: projectIds.length === 1 ? projectIds[0] : null,
         title: `پرداخت پورسانت همکار: ${emp.name}`,
-        description: `بابت تسویه پورسانت فروش / ویزیتوری - کد پیگیری: ${refNumber || "ندارد"} - ${notes}`,
-        expenseDate: new Date(),
-      })
-      .returning();
-
-    // 3. Record Payment in payments table
-    const [createdPayment] = await tx
-      .insert(payments)
-      .values({
-        paymentNumber: payNum,
-        accountId: account.id,
-        amount: amount.toString(),
-        paymentType: "commission_payout",
-        paymentMethod: body.paymentMethod || "bank_transfer",
-        referenceNumber: refNumber,
-        notes: `تسویه پورسانت ${emp.name} - سند هزینه #${expNum}`,
-        status: "completed",
-      })
-      .returning();
-
-    // 4. Record in Commission Ledger as a Payout entry
-    const [createdLedger] = await tx
-      .insert(commissionLedger)
-      .values({
-        employeeId: emp.id,
-        recipientEmployeeId: emp.id,
-        commissionType: "payout",
-        baseAmount: amount.toString(),
-        commissionAmount: (-amount).toString(), // Negative to deduct from pending balance
-        status: "paid",
-        paymentId: createdPayment.id,
-        ruleSnapshot: {
-          payoutType: "manual_commission_payout",
-          expenseNumber: expNum,
-          paymentNumber: payNum,
-          paymentMethod: body.paymentMethod || "bank_transfer",
-          referenceNumber: refNumber,
-          accountName: account.name,
-        },
-        notes: `پرداخت نقدی/بانکی پورسانت: ${notes}`,
-      })
-      .returning();
-
-    await logAuditEvent("COMMISSION_PAYOUT", "commission_ledger", createdLedger.id, {
-      employeeId: emp.id,
-      employeeName: emp.name,
-      amount,
-      accountId: account.id,
-      accountName: account.name,
-      expenseNumber: expNum,
-      paymentNumber: payNum,
+        description: `${notes} - سند پرداخت ${paymentNumber}${referenceNumber ? ` - پیگیری ${referenceNumber}` : ""}`,
+        expenseDate: paymentDate,
+      }).returning();
+      await tx.update(commissionLedger).set({ status: "paid", paymentId: payment.id })
+        .where(inArray(commissionLedger.id, commissionIds));
+      await logAuditEvent("COMMISSION_PAYOUT", "commission_ledger", selected[0].id, {
+        employeeId: emp.id, commissionIds, invoiceIds: selected.map((row) => row.invoiceId).filter(Boolean),
+        amount, accountId: account.id, expenseNumber, paymentNumber,
+      }, undefined, tx);
+      return { amount, payment, expense, commissionIds };
     });
 
     return NextResponse.json({
       success: true,
-      message: `پرداخت پورسانت به مبلغ ${amount.toLocaleString("fa-IR")} تومان با موفقیت ثبت شد و سند هزینه #${expNum} صادر گردید.`,
-      expense: createdExpense,
-      payment: createdPayment,
-      ledger: createdLedger,
+      message: `پورسانت ${result.commissionIds.length} فروش به مبلغ ${result.amount.toLocaleString("fa-IR")} تومان پرداخت شد.`,
+      ...result,
     });
-    });
-  } catch (e: any) {
-    return apiError(e);
+  } catch (error) {
+    return apiError(error);
   }
 }

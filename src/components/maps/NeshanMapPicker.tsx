@@ -8,7 +8,6 @@ interface NeshanMapPickerProps {
   longitude: number | null;
   onChange: (coords: { latitude: number; longitude: number; address?: string; city?: string }) => void;
   height?: string;
-  neshanApiKey?: string;
 }
 
 const IRAN_CITIES = [
@@ -24,12 +23,17 @@ const IRAN_CITIES = [
   { name: "یزد", lat: 31.8974, lng: 54.3569 },
 ];
 
+export function getNeshanCoordinates(result: any): { lat: number; lng: number } | null {
+  const lat = Number(result?.location?.y ?? result?.lat ?? result?.latitude);
+  const lng = Number(result?.location?.x ?? result?.lng ?? result?.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
 export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
   latitude,
   longitude,
   onChange,
   height = "340px",
-  neshanApiKey,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -42,6 +46,7 @@ export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
   const [reverseLoading, setReverseLoading] = useState(false);
   const [detectedAddress, setDetectedAddress] = useState<string>("");
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [searchMessage, setSearchMessage] = useState("");
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -184,8 +189,7 @@ export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
     // Reverse Geocoding with Neshan API proxy
     setReverseLoading(true);
     try {
-      const keyParam = neshanApiKey ? `&apiKey=${encodeURIComponent(neshanApiKey)}` : "";
-      const res = await fetch(`/api/maps/neshan?action=reverse&lat=${fixedLat}&lng=${fixedLng}${keyParam}`);
+      const res = await fetch(`/api/maps/neshan?action=reverse&lat=${fixedLat}&lng=${fixedLng}`);
       const data = await res.json();
 
       if (data.success && data.data?.formatted_address) {
@@ -196,9 +200,12 @@ export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
           address: data.data.formatted_address,
           city: data.data.city || data.data.state || undefined,
         });
+      } else if (!data.success) {
+        setSearchMessage("دریافت نشانی از سرویس نقشه انجام نشد.");
       }
     } catch (err) {
       console.warn("Reverse geocode failed:", err);
+      setSearchMessage("دریافت نشانی از سرویس نقشه انجام نشد.");
     } finally {
       setReverseLoading(false);
     }
@@ -208,10 +215,10 @@ export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
+    setSearchMessage("");
     try {
       const center = mapRef.current?.getCenter() || { lat: 35.6892, lng: 51.3890 };
-      const keyParam = neshanApiKey ? `&apiKey=${encodeURIComponent(neshanApiKey)}` : "";
-      const res = await fetch(`/api/maps/neshan?action=search&term=${encodeURIComponent(searchQuery)}&lat=${center.lat}&lng=${center.lng}${keyParam}`);
+      const res = await fetch(`/api/maps/neshan?action=search&term=${encodeURIComponent(searchQuery)}&lat=${center.lat}&lng=${center.lng}`);
       const data = await res.json();
 
       if (data.success && data.items && data.items.length > 0) {
@@ -219,18 +226,21 @@ export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
       } else {
         const matchingCities = IRAN_CITIES.filter((c) => c.name.includes(searchQuery));
         setSearchResults(matchingCities.map((c) => ({ title: c.name, location: { x: c.lng, y: c.lat } })));
+        setSearchMessage(!data.success ? "جستجوی نقشه انجام نشد؛ تنظیمات API نشان را بررسی کنید." : matchingCities.length === 0 ? "نتیجه‌ای پیدا نشد." : "");
       }
     } catch (e) {
       console.warn("Picker search error:", e);
+      setSearchResults([]);
+      setSearchMessage("جستجوی نقشه انجام نشد؛ تنظیمات API نشان را بررسی کنید.");
     } finally {
       setSearching(false);
     }
   };
 
   const handleSelectSearchResult = (r: any) => {
-    const lat = r.location?.y || r.lat;
-    const lng = r.location?.x || r.lng;
-    if (lat && lng && mapRef.current) {
+    const coordinates = getNeshanCoordinates(r);
+    if (coordinates && mapRef.current) {
+      const { lat, lng } = coordinates;
       mapRef.current.setView([lat, lng], 15, { animate: true });
       if (markerRef.current) {
         markerRef.current.setLatLng([lat, lng]);
@@ -295,7 +305,12 @@ export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleSearch();
+              }
+            }}
             placeholder="جستجوی خیابان یا محله در نشان (مثلاً خیابان ولیعصر)..."
             className="w-full rounded-xl border border-slate-700 bg-slate-950 pr-9 pl-16 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
           />
@@ -337,6 +352,7 @@ export const NeshanMapPicker: React.FC<NeshanMapPickerProps> = ({
           ))}
         </div>
       )}
+      {searchMessage && <p className="text-[11px] text-amber-300">{searchMessage}</p>}
 
       {/* Quick Iranian City Buttons */}
       <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-thin">

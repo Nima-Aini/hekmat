@@ -1,10 +1,10 @@
-import { pageNumber } from "@/lib/apiError";
+import { assertUuid, pageNumber } from "@/lib/apiError";
 import { requestIdentity } from "@/lib/idempotency";
 import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { invoices, invoiceItems, customers, projects, employees, payments } from "@/db/schema";
-import { desc, eq, and } from "drizzle-orm";
+import { asc, count, desc, eq, and, ilike, or, sql } from "drizzle-orm";
 import { createInvoice, reverseInvoice } from "@/services/invoice";
 import { getEmployeeContext, requirePermission } from "@/services/access";
 
@@ -14,15 +14,44 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get("projectId");
     const customerId = searchParams.get("customerId");
+    if (projectId) assertUuid(projectId);
+    if (customerId) assertUuid(customerId);
+    const search = searchParams.get("search")?.trim();
+    const status = searchParams.get("status")?.trim();
+    const paymentStatus = searchParams.get("paymentStatus")?.trim();
     const page = pageNumber(searchParams.get("page"), 1);
     const pageSize = pageNumber(searchParams.get("pageSize"), 20, 100);
     const offset = (page - 1) * pageSize;
+    const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
+    const sortBy = searchParams.get("sortBy") || "createdAt";
+    const direction = sortOrder === "asc" ? asc : desc;
+    const sortExpression = (() => {
+      switch (sortBy) {
+        case "invoiceDate": return direction(invoices.invoiceDate);
+        case "grandTotal": return direction(invoices.grandTotal);
+        case "balanceDue": return direction(invoices.balanceDue);
+        case "employee": return direction(employees.name);
+        case "store": return direction(sql`COALESCE(${customers.storeName}, ${customers.name})`);
+        case "invoiceNumber": return direction(invoices.invoiceNumber);
+        case "status": return direction(invoices.status);
+        case "paymentStatus": return direction(invoices.paymentStatus);
+        default: return direction(invoices.createdAt);
+      }
+    })();
 
     const manager = context.permissions.has("*") || ["admin", "manager"].includes(context.roleCode || "") || context.permissions.has("invoices.manage");
     const conditions = [];
     if (!manager) conditions.push(eq(invoices.employeeId, context.employeeId));
     if (projectId) conditions.push(eq(invoices.projectId, projectId));
     if (customerId) conditions.push(eq(invoices.customerId, customerId));
+    if (status) conditions.push(eq(invoices.status, status));
+    if (paymentStatus) conditions.push(eq(invoices.paymentStatus, paymentStatus));
+    if (search) conditions.push(or(
+      ilike(invoices.invoiceNumber, `%${search}%`),
+      ilike(customers.name, `%${search}%`),
+      ilike(customers.storeName, `%${search}%`),
+      ilike(employees.name, `%${search}%`)
+    )!);
     const query = db
       .select({
         invoice: invoices,
@@ -36,14 +65,22 @@ export async function GET(req: Request) {
       .leftJoin(projects, eq(invoices.projectId, projects.id))
       .leftJoin(employees, eq(invoices.employeeId, employees.id))
       .where(and(...conditions))
-      .orderBy(desc(invoices.createdAt))
+      .orderBy(sortExpression, desc(invoices.createdAt))
       .limit(pageSize)
       .offset(offset);
 
-    const results = await query;
+    const [results, [totalRow]] = await Promise.all([
+      query,
+      db.select({ total: count() }).from(invoices)
+        .innerJoin(customers, eq(invoices.customerId, customers.id))
+        .leftJoin(projects, eq(invoices.projectId, projects.id))
+        .leftJoin(employees, eq(invoices.employeeId, employees.id))
+        .where(and(...conditions)),
+    ]);
     const formatted = results.map(({ invoice, customerName, customerStore, projectName, employeeName }) => ({
       ...invoice,
       customerName: customerStore ? `${customerName} (${customerStore})` : customerName,
+      customerStore: customerStore || null,
       projectName: projectName || "عمومی",
       employeeName: employeeName || "-",
       subtotal: Number(invoice.subtotal),
@@ -54,7 +91,12 @@ export async function GET(req: Request) {
       balanceDue: Number(invoice.balanceDue),
     }));
 
-    return NextResponse.json({ success: true, invoices: formatted, pagination: { page, pageSize } });
+    const total = Number(totalRow?.total || 0);
+    return NextResponse.json({
+      success: true,
+      invoices: formatted,
+      pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    });
   } catch (error: any) {
     return apiError(error);
   }

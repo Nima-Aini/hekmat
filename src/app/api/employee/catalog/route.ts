@@ -3,18 +3,23 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { accounts, employeeProjectAssignments, products, projects } from "@/db/schema";
 import { and, desc, eq } from "drizzle-orm";
-import { requirePermission } from "@/services/access";
+import { ApiError } from "@/lib/apiError";
+import { getEmployeeContext } from "@/services/access";
 
 export async function GET() {
   try {
-    const context = await requirePermission("invoices.create");
+    const context = await getEmployeeContext();
+    if (!context) throw new ApiError(401, "ابتدا وارد حساب کاربری شوید.");
+    const canCreateInvoice = context.permissions.has("*") || context.permissions.has("invoices.create");
+    const canViewProducts = canCreateInvoice || context.permissions.has("products.view");
+    if (!canViewProducts) throw new ApiError(403, "دسترسی به کاتالوگ محصولات وجود ندارد.");
     const productRows = await db
       .select({ id: products.id, code: products.code, name: products.name, unit: products.unit, basePrice: products.basePrice, status: products.status })
       .from(products)
       .where(eq(products.status, "active"))
       .orderBy(products.name);
 
-    let projectRows = await db.select().from(projects).where(eq(projects.status, "active")).orderBy(desc(projects.createdAt));
+    let projectRows = canCreateInvoice ? await db.select().from(projects).where(eq(projects.status, "active")).orderBy(desc(projects.createdAt)) : [];
     if (!context.permissions.has("*")) {
       const assignments = await db
         .select({ projectId: employeeProjectAssignments.projectId })
@@ -24,10 +29,10 @@ export async function GET() {
       projectRows = projectRows.filter((p) => ids.has(p.id) || p.managerEmployeeId === context.employeeId);
     }
 
-    const accountRows = await db
+    const accountRows = canCreateInvoice ? await db
       .select({ id: accounts.id, code: accounts.code, name: accounts.name, type: accounts.type, isDefault: accounts.isDefault })
       .from(accounts)
-      .orderBy(desc(accounts.isDefault), accounts.name);
+      .orderBy(desc(accounts.isDefault), accounts.name) : [];
 
     return NextResponse.json({
       success: true,
