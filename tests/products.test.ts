@@ -2,7 +2,7 @@ import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { PgDialect, getTableConfig, PgTable } from "drizzle-orm/pg-core";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import { GET as projectList, POST as createProject } from "../src/app/api/projects/route";
@@ -23,13 +23,16 @@ vi.mock("@/services/access", async () => {
 });
 import * as schema from "../src/db/schema";
 import { migrateDatabase } from "../src/db/migrate";
-import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, customerAssignments, customerProjectMemberships, invoices, invoiceItems, productionBatches, commissionRules, commissionLedger, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers, accounts, payments, paymentAllocations, employees, alerts } from "../src/db/schema";
+import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, customerAssignments, customerProjectMemberships, invoices, invoiceItems, productionBatches, commissionRules, commissionLedger, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers, accounts, payments, paymentAllocations, employees, alerts, expenses } from "../src/db/schema";
 import { DELETE, PUT } from "../src/app/api/products/[id]/route";
 import { POST, GET } from "../src/app/api/products/route";
 import { DELETE as deleteSpecial } from "../src/app/api/special-products/[id]/route";
 import { createInvoice, deleteInvoice, reverseInvoice, updateInvoice } from "../src/services/invoice";
 import { productInput } from "../src/services/product";
 import { assignCustomer } from "../src/services/partner";
+import { GET as getCommissions, POST as payoutCommissions } from "../src/app/api/employees/[id]/commissions/route";
+import { GET as getInvoices } from "../src/app/api/invoices/route";
+import { runAlertsEngineScan } from "../src/services/alerts";
 const pg = new PGlite();
 const database = drizzle(pg);
 const dialect = new PgDialect();
@@ -50,6 +53,108 @@ beforeAll(async () => {
 afterAll(async () => { await pg.close(); });
 
 describe("Production product lifecycle against PostgreSQL", () => {
+  it("pays only selected invoice commissions and rejects double payout", async () => {
+    const [employee] = await database.insert(employees).values({ code: randomUUID(), name: "همکار پورسانت انتخابی", mobile: "09125550001" }).returning();
+    const [account] = await database.insert(accounts).values({ code: randomUUID(), name: "حساب پورسانت", type: "bank", balance: "1000" }).returning();
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری پورسانت انتخابی", mobile: "09125550002" }).returning();
+    const commissionIds: string[] = [];
+    for (const amount of [100, 200, 300]) {
+      const [invoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: String(amount * 10) }).returning();
+      const [commission] = await database.insert(commissionLedger).values({
+        employeeId: employee.id, recipientEmployeeId: employee.id, invoiceId: invoice.id,
+        ruleSnapshot: { rateValue: 10 }, baseAmount: String(amount * 10), commissionAmount: String(amount), status: "payable",
+      }).returning();
+      commissionIds.push(commission.id);
+    }
+    const body = { commissionIds: [commissionIds[0], commissionIds[2]], accountId: account.id, paymentMethod: "bank_transfer", amount: 1 };
+    const response = await payoutCommissions(request(body), params(employee.id));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.amount).toBe(400);
+    const rows = await database.select().from(commissionLedger).where(inArray(commissionLedger.id, commissionIds));
+    expect(rows.find((row) => row.id === commissionIds[0])?.status).toBe("paid");
+    expect(rows.find((row) => row.id === commissionIds[1])?.status).toBe("payable");
+    expect(rows.find((row) => row.id === commissionIds[2])?.paymentId).toBe(payload.payment.id);
+    expect(Number((await database.select().from(accounts).where(eq(accounts.id, account.id)))[0].balance)).toBe(600);
+    expect(await database.select().from(expenses).where(eq(expenses.id, payload.expense.id))).toHaveLength(1);
+    expect((await payoutCommissions(request(body), params(employee.id))).status).toBe(409);
+
+    const [raceInvoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: "500" }).returning();
+    const [raceCommission] = await database.insert(commissionLedger).values({
+      employeeId: employee.id, recipientEmployeeId: employee.id, invoiceId: raceInvoice.id,
+      ruleSnapshot: { rateValue: 10 }, baseAmount: "500", commissionAmount: "50", status: "payable",
+    }).returning();
+    const raceBody = { commissionIds: [raceCommission.id], accountId: account.id, paymentMethod: "bank_transfer" };
+    const raceResponses = await Promise.all([
+      payoutCommissions(request(raceBody), params(employee.id)),
+      payoutCommissions(request(raceBody), params(employee.id)),
+    ]);
+    expect(raceResponses.map((result) => result.status).sort()).toEqual([200, 409]);
+    expect(Number((await database.select().from(accounts).where(eq(accounts.id, account.id)))[0].balance)).toBe(550);
+  });
+
+  it("keeps legacy payout rows and does not offer their covered sales again", async () => {
+    const [employee] = await database.insert(employees).values({ code: randomUUID(), name: "همکار پورسانت قدیمی", mobile: "09125550011" }).returning();
+    const [account] = await database.insert(accounts).values({ code: randomUUID(), name: "حساب پورسانت قدیمی", type: "bank", balance: "1000" }).returning();
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری پورسانت قدیمی", mobile: "09125550012" }).returning();
+    const positiveIds: string[] = [];
+    for (const [index, amount] of [100, 200].entries()) {
+      const [invoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: String(amount) }).returning();
+      const [row] = await database.insert(commissionLedger).values({
+        employeeId: employee.id, invoiceId: invoice.id, ruleSnapshot: {}, baseAmount: String(amount),
+        commissionAmount: String(amount), status: "pending", createdAt: new Date(`2025-01-0${index + 1}T00:00:00Z`),
+      }).returning();
+      positiveIds.push(row.id);
+    }
+    await database.insert(commissionLedger).values({
+      employeeId: employee.id, commissionType: "payout", ruleSnapshot: {},
+      baseAmount: "100", commissionAmount: "-100", status: "paid", createdAt: new Date("2025-01-03T00:00:00Z"),
+    });
+    const payload = await (await getCommissions(new Request("http://localhost"), params(employee.id))).json();
+    expect(payload.commissions.find((row: any) => row.id === positiveIds[0]).legacyCovered).toBe(true);
+    expect(payload.commissions.find((row: any) => row.id === positiveIds[1]).eligibleForPayout).toBe(true);
+    expect(payload.summary).toMatchObject({ totalEarned: 300, totalPaid: 100, balancePending: 200 });
+    expect((await payoutCommissions(request({ commissionIds: [positiveIds[0]], accountId: account.id }), params(employee.id))).status).toBe(409);
+  });
+
+  it("sorts the complete invoice result before pagination", async () => {
+    const marker = randomUUID().slice(0, 8);
+    const sortingEmployees = [];
+    for (const name of ["ج", "الف", "ب"]) {
+      const [employee] = await database.insert(employees).values({ code: randomUUID(), name: `${name} ${marker}`, mobile: `0921${randomUUID().replace(/\D/g, "").padEnd(7, "1").slice(0, 7)}` }).returning();
+      sortingEmployees.push(employee);
+    }
+    for (const [index, amount] of [300, 100, 200].entries()) {
+      const storePrefix = ["ی", "الف", "م"][index];
+      const [customer] = await database.insert(customers).values({ code: randomUUID(), name: `مشتری ${marker} ${index}`, storeName: `${storePrefix} ${marker}`, mobile: `0935${randomUUID().replace(/\D/g, "").padEnd(7, "2").slice(0, 7)}` }).returning();
+      await database.insert(invoices).values({ invoiceNumber: `${marker}-${index}`, customerId: customer.id, employeeId: sortingEmployees[index].id, grandTotal: String(amount), balanceDue: String(amount), invoiceDate: new Date(`2026-09-0${index + 1}T00:00:00Z`) });
+    }
+    const result = await (await getInvoices(new Request(`http://localhost/api/invoices?search=${marker}&sortBy=grandTotal&sortOrder=asc&page=1&pageSize=2`))).json();
+    expect(result.invoices.map((invoice: any) => invoice.grandTotal)).toEqual([100, 200]);
+    expect(result.pagination).toMatchObject({ page: 1, pageSize: 2, total: 3, totalPages: 2 });
+    const byDate = await (await getInvoices(new Request(`http://localhost/api/invoices?search=${marker}&sortBy=invoiceDate&sortOrder=desc&pageSize=3`))).json();
+    expect(byDate.invoices.map((invoice: any) => invoice.invoiceNumber)).toEqual([`${marker}-2`, `${marker}-1`, `${marker}-0`]);
+    const byEmployee = await (await getInvoices(new Request(`http://localhost/api/invoices?search=${marker}&sortBy=employee&sortOrder=asc&pageSize=3`))).json();
+    expect(byEmployee.invoices.map((invoice: any) => invoice.employeeName)).toEqual([`الف ${marker}`, `ب ${marker}`, `ج ${marker}`]);
+    const byStore = await (await getInvoices(new Request(`http://localhost/api/invoices?search=${marker}&sortBy=store&sortOrder=asc&pageSize=3`))).json();
+    expect(byStore.invoices.map((invoice: any) => invoice.customerStore)).toEqual([`الف ${marker}`, `م ${marker}`, `ی ${marker}`]);
+  });
+
+  it("uses store name in overdue alerts and auto-closes stale alerts", async () => {
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "نام مسئول اعلان", storeName: "فروشگاه اعلان", mobile: "09125550999" }).returning();
+    const [invoice] = await database.insert(invoices).values({
+      invoiceNumber: randomUUID(), customerId: customer.id, grandTotal: "100", balanceDue: "100",
+      dueDate: new Date("2020-01-01T00:00:00Z"), status: "issued",
+    }).returning();
+    await runAlertsEngineScan();
+    const [createdAlert] = await database.select().from(alerts).where(eq(alerts.dedupKey, `overdue_inv_${invoice.id}`));
+    expect(createdAlert.message).toContain("فروشگاه اعلان");
+    expect(createdAlert.message).not.toContain("نام مسئول اعلان");
+    await database.update(invoices).set({ balanceDue: "0", paymentStatus: "paid" }).where(eq(invoices.id, invoice.id));
+    await runAlertsEngineScan();
+    const [closedAlert] = await database.select().from(alerts).where(eq(alerts.id, createdAlert.id));
+    expect(closedAlert.status).toBe("auto_closed");
+  });
   it("has no legacy required columns that block current ORM inserts", async () => {
     const blocking: string[] = [];
     for (const table of Object.values(schema)) {

@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { alerts, products, rawMaterials, invoices, customers, projects } from "@/db/schema";
-import { eq, and, lt, gt, sql, desc } from "drizzle-orm";
+import { eq, and, lt, gt, sql, desc, inArray } from "drizzle-orm";
 import { formatMoney } from "@/lib/dateUtils";
 
 /**
@@ -70,6 +70,7 @@ export async function runAlertsEngineScan() {
       balanceDue: invoices.balanceDue,
       dueDate: invoices.dueDate,
       customerName: customers.name,
+      storeName: customers.storeName,
       projectId: invoices.projectId,
     })
     .from(invoices)
@@ -87,7 +88,7 @@ export async function runAlertsEngineScan() {
           type: "overdue_invoice",
           severity: "warning",
           title: `فاکتور سررسید گذشته: #${inv.invoiceNumber}`,
-          message: `فاکتور #${inv.invoiceNumber} مشتری "${inv.customerName}" به مبلغ ${balanceNum} تومان سررسید شده و تسویه نشده است.`,
+          message: `فاکتور #${inv.invoiceNumber} فروشگاه «${inv.storeName || inv.customerName}» به مبلغ ${balanceNum} تومان سررسید شده و هنوز تسویه نشده است.`,
           entityType: "invoice",
           entityId: inv.id,
           projectId: inv.projectId,
@@ -96,6 +97,17 @@ export async function runAlertsEngineScan() {
         .returning();
       generatedAlerts.push(newAlert);
     }
+  }
+
+  // Keep history, but automatically close overdue alerts whose invoice is no longer overdue.
+  const activeOverdue = await db.select({ id: alerts.id, entityId: alerts.entityId }).from(alerts)
+    .where(and(eq(alerts.type, "overdue_invoice"), inArray(alerts.status, ["new", "active", "in_review"])));
+  const overdueIds = overdueInvoices.map((invoice) => invoice.id);
+  const staleIds = activeOverdue
+    .filter((alert) => !alert.entityId || !overdueIds.includes(alert.entityId))
+    .map((alert) => alert.id);
+  if (staleIds.length > 0) {
+    await db.update(alerts).set({ status: "auto_closed", updatedAt: new Date() }).where(inArray(alerts.id, staleIds));
   }
 
   return generatedAlerts;
@@ -108,7 +120,7 @@ export async function getActiveAlerts(projectId?: string | null) {
   const result = await db
     .select()
     .from(alerts)
-    .where(eq(alerts.status, "active"))
+    .where(inArray(alerts.status, ["new", "active", "in_review"]))
     .orderBy(desc(alerts.createdAt));
 
   if (projectId) {

@@ -549,9 +549,6 @@ export const PurchasesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsPurchaseModalOpen(false);
-          }}
         >
           <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-5 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -732,9 +729,6 @@ export const PurchasesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsSupplierModalOpen(false);
-          }}
         >
           <div className="w-full max-w-xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-5 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">

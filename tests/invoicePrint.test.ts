@@ -57,4 +57,19 @@ describe("canonical invoice document", () => {
     const html = generateInvoiceHtml(invoiceWithItems(1));
     expect(html).toContain("توضیح &lt;تست&gt;");
   });
+
+  it("prints only the store identity for the buyer", () => {
+    const data = invoiceWithItems(1);
+    data.invoice.customerName = "نام شخص مسئول";
+    data.invoice.customerStore = "فروشگاه پاکیزه";
+    data.invoice.customerMobile = "09120000000";
+    data.invoice.customerAddress = "نشانی خصوصی مشتری";
+    data.invoice.employeeName = "ویزیتور نمونه";
+    const html = generateInvoiceHtml(data);
+    expect(html).toContain("فروشگاه پاکیزه");
+    expect(html).not.toContain("نام شخص مسئول");
+    expect(html).not.toContain("09120000000");
+    expect(html).not.toContain("نشانی خصوصی مشتری");
+    expect(html).not.toContain("ویزیتور نمونه");
+  });
 });

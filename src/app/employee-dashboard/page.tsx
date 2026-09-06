@@ -27,7 +27,8 @@ import {
   Calculator,
   UserCheck,
   ShieldCheck,
-  Search
+  Search,
+  Menu
 } from "lucide-react";
 import { toJalaliDate, formatMoney, formatNumber } from "@/lib/dateUtils";
 import { NeshanMapPicker } from "@/components/maps/NeshanMapPicker";
@@ -36,6 +37,7 @@ export default function EmployeeDashboardPage() {
   const router = useRouter();
   const [me, setMe] = useState<any>(null);
   const [roleCode, setRoleCode] = useState<string>("visitor");
+  const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [dash, setDash] = useState<any>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -46,6 +48,7 @@ export default function EmployeeDashboardPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Modals
   const [showCustomer, setShowCustomer] = useState(false);
@@ -101,16 +104,15 @@ export default function EmployeeDashboardPage() {
         return;
       }
       setMe(m.employee);
+      setPermissions(new Set(Array.isArray(m.permissions) ? m.permissions : []));
       const currentRole = m.role?.code || m.employee?.role || "visitor";
       setRoleCode(currentRole);
 
       // If admin, they can go to master or stay here
-      const isAccountant = currentRole === "accountant" || currentRole === "manager" || currentRole === "admin";
-
       const [d, c, i, cat, pay] = await Promise.allSettled([
         fetch(`/api/employees/${m.employee.id}/dashboard`, { cache: "no-store" }).then((x) => x.json()),
-        fetch(`/api/customers?${isAccountant ? "" : "mine=1&"}pageSize=100`, { cache: "no-store" }).then((x) => x.json()),
-        fetch(`/api/invoices${isAccountant ? "" : "?mine=1"}`, { cache: "no-store" }).then((x) => x.json()),
+        fetch("/api/customers?pageSize=100", { cache: "no-store" }).then((x) => x.json()),
+        fetch("/api/invoices?pageSize=100", { cache: "no-store" }).then((x) => x.json()),
         fetch("/api/employee/catalog", { cache: "no-store" }).then((x) => x.json()),
         fetch("/api/payments", { cache: "no-store" }).then((x) => x.json()),
       ]);
@@ -146,6 +148,7 @@ export default function EmployeeDashboardPage() {
   const accounts = catalog.accounts || [];
 
   const isAccountant = roleCode === "accountant" || roleCode === "admin" || roleCode === "manager";
+  const can = (permission: string) => permissions.has("*") || permissions.has(permission);
 
   function selectProduct(i: number, id: string) {
     const p = products.find((x: any) => x.id === id);
@@ -422,7 +425,7 @@ export default function EmployeeDashboardPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-white p-4 md:p-6 dir-rtl font-sans antialiased">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6 md:pr-60">
         {/* Header with Role Badge */}
         <header className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center border-b border-slate-800 pb-5">
           <div className="flex items-center gap-3">
@@ -450,7 +453,10 @@ export default function EmployeeDashboardPage() {
           </div>
 
           <div className="flex flex-wrap gap-2 items-center">
-            {(roleCode === "admin" || roleCode === "manager") && (
+            <button onClick={() => setSidebarOpen(true)} className="md:hidden rounded-xl border border-slate-800 bg-slate-900 p-2 text-slate-300" aria-label="باز کردن منو">
+              <Menu className="h-5 w-5" />
+            </button>
+            {(can("*") || can("employees.manage")) && (
               <button
                 onClick={() => router.push("/")}
                 className="rounded-xl border border-purple-500/40 bg-purple-950/40 px-3.5 py-2 text-xs flex items-center gap-1.5 text-purple-300 hover:bg-purple-900/50 transition font-bold"
@@ -484,7 +490,15 @@ export default function EmployeeDashboardPage() {
         )}
 
         {/* Navigation Tabs */}
-        <nav className="flex flex-wrap gap-2 border-b border-slate-800/80 pb-3">
+        {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/70 md:hidden" aria-hidden="true" />}
+        <nav
+          onClick={(event) => { if ((event.target as HTMLElement).closest("button")) setSidebarOpen(false); }}
+          className={`${sidebarOpen ? "flex" : "hidden"} fixed inset-y-0 right-0 z-50 w-72 flex-col gap-2 overflow-y-auto border-l border-slate-800 bg-slate-950 p-4 shadow-2xl md:inset-y-4 md:right-4 md:flex md:w-56 md:rounded-3xl md:border`}
+        >
+          <div className="mb-2 flex items-center justify-between border-b border-slate-800 pb-3">
+            <span className="text-sm font-bold text-white">منوی همکار</span>
+            <button type="button" onClick={() => setSidebarOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 md:hidden" aria-label="بستن منو"><X className="h-4 w-4" /></button>
+          </div>
           <button
             onClick={() => setTab("overview")}
             className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
@@ -498,7 +512,7 @@ export default function EmployeeDashboardPage() {
             داشبورد کلی
           </button>
 
-          <button
+          {can("customers.view") && <button
             onClick={() => setTab("customers")}
             className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
               tab === "customers"
@@ -509,9 +523,9 @@ export default function EmployeeDashboardPage() {
             }`}
           >
             مدیریت مشتریان ({customers.length})
-          </button>
+          </button>}
 
-          <button
+          {can("invoices.view") && <button
             onClick={() => setTab("invoices")}
             className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
               tab === "invoices"
@@ -522,9 +536,9 @@ export default function EmployeeDashboardPage() {
             }`}
           >
             فاکتورهای فروش ({invoices.length})
-          </button>
+          </button>}
 
-          {isAccountant && (
+          {can("payments.view") && (
             <button
               onClick={() => setTab("payments")}
               className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
@@ -537,7 +551,7 @@ export default function EmployeeDashboardPage() {
             </button>
           )}
 
-          <button
+          {can("products.view") && <button
             onClick={() => setTab("catalog")}
             className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
               tab === "catalog"
@@ -548,24 +562,24 @@ export default function EmployeeDashboardPage() {
             }`}
           >
             کاتالوگ محصولات ({products.length})
-          </button>
+          </button>}
 
-          <div className="mr-auto flex gap-2">
-            <button
+          <div className="mt-auto flex flex-col gap-2 border-t border-slate-800 pt-3">
+            {can("customers.create") && <button
               onClick={() => openCustomerModal()}
               className="rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white flex items-center gap-1.5 hover:bg-emerald-500 transition shadow"
             >
               <Plus className="h-4 w-4" />
               + افزودن مشتری
-            </button>
-            <button
+            </button>}
+            {can("invoices.create") && <button
               onClick={() => setShowInvoice(true)}
               className="rounded-xl bg-purple-600 px-3.5 py-2 text-xs font-bold text-white flex items-center gap-1.5 hover:bg-purple-500 transition shadow"
             >
               <FilePlus2 className="h-4 w-4" />
               + صدور فاکتور
-            </button>
-            {isAccountant && (
+            </button>}
+            {can("payments.create") && (
               <button
                 onClick={() => setShowPayment(true)}
                 className="rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white flex items-center gap-1.5 hover:bg-blue-500 transition shadow"
@@ -625,12 +639,12 @@ export default function EmployeeDashboardPage() {
             <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 space-y-3">
               <div className="flex justify-between items-center">
                 <h2 className="font-bold text-sm text-white">آخرین فاکتورهای صادرشده</h2>
-                <button
+                {can("invoices.view") && <button
                   onClick={() => setTab("invoices")}
                   className="text-xs text-cyan-400 hover:underline"
                 >
                   مشاهده همه
-                </button>
+                </button>}
               </div>
 
               <div className="responsive-table overflow-x-auto">
@@ -673,7 +687,7 @@ export default function EmployeeDashboardPage() {
                         </td>
                         <td className="p-3 text-center">
                           <div className="flex justify-center gap-1.5">
-                            <button
+                            {can("invoices.update") && <button
                               onClick={() =>
                                 setEditInvoice({
                                   ...x,
@@ -683,8 +697,8 @@ export default function EmployeeDashboardPage() {
                               className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 hover:text-white"
                             >
                               ویرایش
-                            </button>
-                            {x.paymentStatus !== "paid" && (
+                            </button>}
+                            {can("payments.create") && x.paymentStatus !== "paid" && (
                               <button
                                 onClick={() => markPaid(x)}
                                 disabled={busy}
@@ -732,13 +746,13 @@ export default function EmployeeDashboardPage() {
                     className="w-full rounded-xl bg-slate-950 border border-slate-800 py-1.5 pr-8 pl-3 text-xs text-white placeholder-slate-500 focus:border-cyan-500 outline-none"
                   />
                 </div>
-                <button
+                {can("customers.create") && <button
                   onClick={() => openCustomerModal()}
                   className="rounded-xl bg-emerald-500 text-slate-950 px-4 py-2 text-xs font-bold hover:bg-emerald-400 transition flex items-center gap-1.5 shrink-0"
                 >
                   <Plus className="h-4 w-4" />
                   + مشتری جدید
-                </button>
+                </button>}
               </div>
             </div>
 
@@ -777,13 +791,13 @@ export default function EmployeeDashboardPage() {
                         )}
                       </td>
                       <td className="p-3 text-center">
-                        <button
+                        {can("customers.update") && <button
                           onClick={() => openCustomerModal(c)}
                           className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-cyan-300 hover:text-white hover:bg-slate-700 transition flex items-center gap-1 mx-auto"
                         >
                           <Edit2 className="h-3.5 w-3.5" />
                           ویرایش
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   ))}
@@ -819,13 +833,13 @@ export default function EmployeeDashboardPage() {
                     className="w-full rounded-xl bg-slate-950 border border-slate-800 py-1.5 pr-8 pl-3 text-xs text-white placeholder-slate-500 focus:border-purple-500 outline-none"
                   />
                 </div>
-                <button
+                {can("invoices.create") && <button
                   onClick={() => setShowInvoice(true)}
                   className="rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold hover:bg-purple-500 transition flex items-center gap-1.5 shrink-0"
                 >
                   <FilePlus2 className="h-4 w-4" />
                   + صدور فاکتور جدید
-                </button>
+                </button>}
               </div>
             </div>
 
@@ -869,7 +883,7 @@ export default function EmployeeDashboardPage() {
                       </td>
                       <td className="p-3 text-center">
                         <div className="flex justify-center gap-1.5">
-                          <button
+                          {can("invoices.update") && <button
                             onClick={() =>
                               setEditInvoice({
                                 ...inv,
@@ -879,8 +893,8 @@ export default function EmployeeDashboardPage() {
                             className="rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 hover:text-white"
                           >
                             ویرایش
-                          </button>
-                          {inv.paymentStatus !== "paid" && (
+                          </button>}
+                          {can("payments.create") && inv.paymentStatus !== "paid" && (
                             <button
                               onClick={() => markPaid(inv)}
                               disabled={busy}
@@ -907,20 +921,20 @@ export default function EmployeeDashboardPage() {
         )}
 
         {/* TAB 4: PAYMENTS (Accountant only) */}
-        {tab === "payments" && isAccountant && (
+        {tab === "payments" && can("payments.view") && (
           <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 space-y-4">
             <div className="flex justify-between items-center">
               <div>
                 <h2 className="text-base font-bold text-white">دفتر دریافت‌ها، پرداخت‌ها و خزانه‌داری</h2>
                 <p className="text-xs text-slate-400">ثبت وجوه دریافتی از مشتریان و پرداختی به تامین‌کنندگان و هزینه‌ها</p>
               </div>
-              <button
+              {can("payments.create") && <button
                 onClick={() => setShowPayment(true)}
                 className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold hover:bg-blue-500 transition flex items-center gap-1.5"
               >
                 <Plus className="h-4 w-4" />
                 + ثبت سند مالی جدید
-              </button>
+              </button>}
             </div>
 
             <div className="responsive-table overflow-x-auto">
@@ -1012,9 +1026,6 @@ export default function EmployeeDashboardPage() {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowCustomer(false);
-          }}
         >
           <form
             onSubmit={saveCustomer}
@@ -1170,9 +1181,6 @@ export default function EmployeeDashboardPage() {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 bg-black/80 overflow-y-auto p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowInvoice(false);
-          }}
         >
           <form
             onSubmit={saveInvoice}
@@ -1376,9 +1384,6 @@ export default function EmployeeDashboardPage() {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEditInvoice(null);
-          }}
         >
           <form
             onSubmit={updateInvoice}
@@ -1454,9 +1459,6 @@ export default function EmployeeDashboardPage() {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowPayment(false);
-          }}
         >
           <form
             onSubmit={savePayment}

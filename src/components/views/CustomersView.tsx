@@ -34,7 +34,6 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [customerPage, setCustomerPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
-  const [neshanApiKey, setNeshanApiKey] = useState("");
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -72,15 +71,13 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [custRes, empRes, settRes] = await Promise.all([
+      const [custRes, empRes] = await Promise.all([
         fetch(`/api/customers?${new URLSearchParams({ page: String(customerPage), pageSize: "20", ...(selectedProjectId ? { projectId: selectedProjectId } : {}), ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}) })}`).then((r) => r.json()),
         fetch("/api/employees").then((r) => r.json()),
-        fetch("/api/settings").then((r) => r.json()),
       ]);
 
       if (custRes.success) { setCustomers(custRes.customers || []); setPagination(custRes.pagination || { page: 1, pageSize: 20, total: 0, totalPages: 0 }); }
       if (empRes.success) setEmployees(empRes.employees || []);
-      if (settRes?.success && settRes.settings) setNeshanApiKey(settRes.settings.neshanApiKey || "");
     } catch (err) {
       console.error("Error fetching customers:", err);
     } finally {
@@ -372,9 +369,6 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsAddModalOpen(false);
-          }}
         >
           <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-5 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -537,7 +531,6 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
                       city: prev.city?.trim() ? prev.city : (city || prev.city),
                     }))
                   }
-                  neshanApiKey={neshanApiKey}
                 />
               </div>
 
@@ -579,9 +572,6 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setViewingProfile(null);
-          }}
         >
           <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-5 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">

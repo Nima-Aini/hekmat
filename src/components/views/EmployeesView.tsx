@@ -69,13 +69,13 @@ export const EmployeesView: React.FC = () => {
   const [commissionSummary, setCommissionSummary] = useState({ totalEarned: 0, totalPaid: 0, balancePending: 0 });
   const [financialAccounts, setFinancialAccounts] = useState<any[]>([]);
   const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [selectedCommissionIds, setSelectedCommissionIds] = useState<string[]>([]);
   const [payoutForm, setPayoutForm] = useState({
-    amount: 0,
     accountId: "",
     paymentMethod: "bank_transfer",
     referenceNumber: "",
     notes: "",
-    projectId: "",
+    paymentDate: new Date().toISOString().slice(0, 10),
   });
   const [payoutSaving, setPayoutSaving] = useState(false);
   const [payoutError, setPayoutError] = useState("");
@@ -363,7 +363,11 @@ export const EmployeesView: React.FC = () => {
   const changePermissionProject = (projectId: string) => {
     setPermissionProjectId(projectId);
     const a = permissionData.projects?.find((x: any) => x.assignment.projectId === projectId)?.assignment;
-    setPermissionSet((a?.permissionSet || {}) as Record<string, boolean>);
+    const roleDefaults = Object.fromEntries((permissionData.permissions || []).map((permission: any) => [
+      permission.code,
+      permissionData.rolePermissions?.includes(permission.code) || false,
+    ]));
+    setPermissionSet({ ...roleDefaults, ...((a?.permissionSet || {}) as Record<string, boolean>) });
   };
 
   const savePermissions = async () => {
@@ -382,6 +386,7 @@ export const EmployeesView: React.FC = () => {
       const res = await fetch(`/api/employees/${empId}/commissions`).then((r) => r.json());
       if (res.success) {
         setCommissions(res.commissions || []);
+        setSelectedCommissionIds([]);
         if (res.summary) setCommissionSummary(res.summary);
         if (res.accounts) setFinancialAccounts(res.accounts || []);
       }
@@ -394,12 +399,11 @@ export const EmployeesView: React.FC = () => {
     if (!selected) return;
     const defaultAcc = financialAccounts[0]?.id || "";
     setPayoutForm({
-      amount: commissionSummary.balancePending || 0,
       accountId: defaultAcc,
       paymentMethod: "bank_transfer",
       referenceNumber: "",
       notes: `تسویه پورسانت به ${selected.name}`,
-      projectId: selected.projectId || "",
+      paymentDate: new Date().toISOString().slice(0, 10),
     });
     setPayoutError("");
     setShowPayoutModal(true);
@@ -407,8 +411,8 @@ export const EmployeesView: React.FC = () => {
 
   const handleCommissionPayout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selected || payoutForm.amount <= 0 || !payoutForm.accountId) {
-      alert("مبلغ و حساب بانکی پرداختی الزامی هستند.");
+    if (!selected || selectedCommissionIds.length === 0 || !payoutForm.accountId) {
+      alert("حداقل یک پورسانت و حساب پرداخت‌کننده را انتخاب کنید.");
       return;
     }
 
@@ -418,7 +422,7 @@ export const EmployeesView: React.FC = () => {
       const res = await fetch(`/api/employees/${selected.id}/commissions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payoutForm),
+        body: JSON.stringify({ ...payoutForm, commissionIds: selectedCommissionIds }),
       }).then((r) => r.json());
 
       if (res.success) {
@@ -434,6 +438,26 @@ export const EmployeesView: React.FC = () => {
       setPayoutSaving(false);
     }
   };
+
+  const payableCommissions = commissions.filter((commission) => commission.eligibleForPayout);
+  const selectedCommissionTotal = payableCommissions
+    .filter((commission) => selectedCommissionIds.includes(commission.id))
+    .reduce((sum, commission) => sum + Number(commission.commissionAmount || 0), 0);
+  const toggleCommission = (id: string) => setSelectedCommissionIds((current) =>
+    current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+  );
+  const permissionGroups = (permissionData.permissions || []).reduce((groups: Record<string, any[]>, permission: any) => {
+    const prefix = String(permission.code || "").split(".")[0];
+    const labels: Record<string, string> = {
+      customers: "مشتریان", invoices: "فاکتورها", payments: "پرداخت‌ها", commissions: "پورسانت",
+      products: "محصولات", projects: "پروژه‌ها", reports: "گزارش‌ها", financial: "مالی",
+      expenses: "هزینه‌ها", purchases: "خرید", production: "تولید", employees: "همکاران",
+      alerts: "اعلانات", raw_materials: "مواد اولیه", suppliers: "تأمین‌کنندگان",
+    };
+    const group = labels[prefix] || "سایر دسترسی‌ها";
+    (groups[group] ||= []).push(permission);
+    return groups;
+  }, {});
 
   const monthlySales = useMemo(() => {
     const m = new Map<string, number>();
@@ -599,9 +623,6 @@ export const EmployeesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 md:p-6 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setSelected(null);
-          }}
         >
           <div className="max-w-6xl mx-auto rounded-3xl bg-slate-950 border border-slate-800 p-5 md:p-7 space-y-5 my-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -884,10 +905,11 @@ export const EmployeesView: React.FC = () => {
                   </div>
                   <button
                     onClick={openPayoutModal}
-                    className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-emerald-600/30 hover:opacity-95 transition flex items-center gap-1.5 shrink-0"
+                    disabled={selectedCommissionIds.length === 0}
+                    className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-emerald-600/30 hover:opacity-95 transition flex items-center gap-1.5 shrink-0 disabled:opacity-40"
                   >
                     <Wallet className="h-4 w-4" />
-                    <span>ثبت پرداخت / تسویه پورسانت</span>
+                    <span>پرداخت موارد انتخاب‌شده ({selectedCommissionIds.length.toLocaleString("fa-IR")})</span>
                   </button>
                 </div>
 
@@ -896,6 +918,12 @@ export const EmployeesView: React.FC = () => {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-slate-400 bg-slate-900 border-b border-slate-800">
+                        <th className="p-3 text-center">
+                          <input type="checkbox" aria-label="انتخاب همه پورسانت‌های قابل پرداخت"
+                            checked={payableCommissions.length > 0 && selectedCommissionIds.length === payableCommissions.length}
+                            onChange={(event) => setSelectedCommissionIds(event.target.checked ? payableCommissions.map((item) => item.id) : [])}
+                          />
+                        </th>
                         <th className="p-3 text-right">نوع تراکنش</th>
                         <th className="p-3 text-right">مبلغ پورسانت / پرداختی</th>
                         <th className="p-3 text-center">مبنا / شماره فاکتور</th>
@@ -909,6 +937,15 @@ export const EmployeesView: React.FC = () => {
                         const isPayout = c.commissionType === "payout" || Number(c.commissionAmount) < 0;
                         return (
                           <tr key={c.id} className="hover:bg-slate-900/50">
+                            <td className="p-3 text-center">
+                              {!isPayout && (
+                                <input type="checkbox" aria-label={`انتخاب پورسانت فاکتور ${c.invoiceNumber || ""}`}
+                                  disabled={!c.eligibleForPayout}
+                                  checked={selectedCommissionIds.includes(c.id)}
+                                  onChange={() => toggleCommission(c.id)}
+                                />
+                              )}
+                            </td>
                             <td className="p-3">
                               {isPayout ? (
                                 <span className="inline-flex items-center gap-1 text-purple-300 font-bold bg-purple-950/60 border border-purple-500/30 px-2 py-0.5 rounded-lg text-[11px]">
@@ -935,7 +972,12 @@ export const EmployeesView: React.FC = () => {
                             </td>
                             <td className="p-3 text-center text-slate-300 font-mono">
                               {c.invoiceId ? (
-                                <span className="text-cyan-300">فاکتور</span>
+                                <div>
+                                  <span className="text-cyan-300">{c.invoiceNumber || "فاکتور"}</span>
+                                  <div className="text-[10px] text-slate-500">{c.storeName || "—"} · {c.projectName || "عمومی"}</div>
+                                  <div className="text-[10px] text-slate-500">{c.invoiceDate ? toJalaliDate(c.invoiceDate) : "—"} · فروش {formatMoney(c.invoiceTotal || c.baseAmount)}</div>
+                                  <div className="text-[10px] text-slate-500">مبنای پورسانت {formatMoney(c.baseAmount)} · نرخ {c.ruleSnapshot?.rateValue ?? c.ruleSnapshot?.rate ?? "—"}٪</div>
+                                </div>
                               ) : c.baseAmount ? (
                                 formatMoney(c.baseAmount)
                               ) : (
@@ -950,9 +992,14 @@ export const EmployeesView: React.FC = () => {
                                   {c.ruleSnapshot.accountName ? ` | ${c.ruleSnapshot.accountName}` : ""}
                                 </div>
                               )}
+                              {c.paymentNumber && <div className="text-[10px] text-emerald-400 mt-0.5">سند: {c.paymentNumber} · {c.paymentDate ? toJalaliDate(c.paymentDate) : ""}</div>}
                             </td>
                             <td className="p-3 text-center">
-                              {c.status === "paid" ? (
+                              {c.legacyCovered ? (
+                                <span className="inline-flex items-center gap-1 text-purple-300 text-[10px] bg-purple-950/40 px-2 py-0.5 rounded-md border border-purple-500/20">
+                                  تسویه در سیستم قدیمی
+                                </span>
+                              ) : c.status === "paid" ? (
                                 <span className="inline-flex items-center gap-1 text-emerald-300 text-[10px] bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/20">
                                   <CheckCircle2 className="h-3 w-3" />
                                   تسویه شده
@@ -972,7 +1019,7 @@ export const EmployeesView: React.FC = () => {
                       })}
                       {commissions.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="p-8 text-center text-slate-500">
+                          <td colSpan={7} className="p-8 text-center text-slate-500">
                             هنوز هیچ پورسانت یا پرداختی برای این همکار ثبت نشده است.
                           </td>
                         </tr>
@@ -1040,21 +1087,22 @@ export const EmployeesView: React.FC = () => {
 
                 <div className="space-y-2">
                   <span className="text-xs text-slate-300 font-semibold block">دسترسی‌های فعال در این پروژه:</span>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                    {(permissionData.permissions || []).map((p: any) => (
-                      <label
-                        key={p.code}
-                        className="flex items-center gap-2.5 rounded-xl bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 hover:border-purple-500/50 cursor-pointer transition"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={permissionSet[p.code] !== false}
-                          onChange={(e) => setPermissionSet((v) => ({ ...v, [p.code]: e.target.checked }))}
-                          className="rounded text-purple-500 h-4 w-4"
-                        />
-                        <span className="font-medium">{p.name || p.code}</span>
-                        <span className="text-[9px] text-slate-500 mr-auto font-mono">{p.code}</span>
-                      </label>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {Object.entries(permissionGroups).map(([group, groupPermissions]) => (
+                      <section key={group} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                        <h5 className="mb-2 text-xs font-bold text-purple-300">{group}</h5>
+                        <div className="space-y-2">
+                          {(groupPermissions as any[]).map((p: any) => (
+                            <label key={p.code} className="flex items-center gap-2.5 rounded-xl bg-slate-950 border border-slate-800 p-2.5 text-xs text-slate-200 hover:border-purple-500/50 cursor-pointer transition">
+                              <input type="checkbox" checked={permissionSet[p.code] === true}
+                                onChange={(e) => setPermissionSet((v) => ({ ...v, [p.code]: e.target.checked }))}
+                                className="rounded text-purple-500 h-4 w-4" />
+                              <span className="font-medium">{p.name || p.code}</span>
+                              <span className="text-[9px] text-slate-500 mr-auto font-mono">{p.code}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 </div>
@@ -1368,9 +1416,6 @@ export const EmployeesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowCreate(false);
-          }}
         >
           <form
             onSubmit={create}
@@ -1572,9 +1617,6 @@ export const EmployeesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowAccount(false);
-          }}
         >
           <div className="w-full max-w-md rounded-3xl bg-slate-950 border border-slate-800 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1640,9 +1682,6 @@ export const EmployeesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowEdit(false);
-          }}
         >
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-slate-950 border border-slate-800 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1807,9 +1846,6 @@ export const EmployeesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowTransfer(false);
-          }}
         >
           <div className="w-full max-w-lg rounded-3xl bg-slate-950 border border-slate-800 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1874,9 +1910,6 @@ export const EmployeesView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowPayoutModal(false);
-          }}
         >
           <div className="w-full max-w-lg rounded-3xl bg-slate-950 border border-slate-800 p-6 space-y-5 shadow-2xl my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1908,25 +1941,10 @@ export const EmployeesView: React.FC = () => {
             )}
 
             <form onSubmit={handleCommissionPayout} className="space-y-4 text-xs">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-slate-300 font-semibold">مبلغ پرداختی (تومان):</label>
-                  {commissionSummary.balancePending > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setPayoutForm({ ...payoutForm, amount: commissionSummary.balancePending })}
-                      className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1"
-                    >
-                      <span>تسویه کامل کل مانده</span>
-                    </button>
-                  )}
-                </div>
-                <MoneyInput
-                  value={payoutForm.amount}
-                  onChange={(val) => setPayoutForm({ ...payoutForm, amount: val })}
-                  className="w-full text-sm"
-                  unit="تومان"
-                />
+              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-4">
+                <div className="text-slate-300">جمع {selectedCommissionIds.length.toLocaleString("fa-IR")} پورسانت انتخاب‌شده</div>
+                <div className="mt-1 font-mono text-lg font-black text-emerald-300">{formatMoney(selectedCommissionTotal)}</div>
+                <p className="mt-1 text-[10px] text-slate-500">مبلغ در سرور از ردیف‌های انتخاب‌شده محاسبه می‌شود و قابل تغییر دستی نیست.</p>
               </div>
 
               <div>
@@ -1980,6 +1998,13 @@ export const EmployeesView: React.FC = () => {
               </div>
 
               <div>
+                <label className="block text-slate-300 font-semibold mb-1">تاریخ پرداخت:</label>
+                <input type="date" value={payoutForm.paymentDate}
+                  onChange={(e) => setPayoutForm({ ...payoutForm, paymentDate: e.target.value })}
+                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2.5 text-white" required />
+              </div>
+
+              <div>
                 <label className="block text-slate-300 font-semibold mb-1">توضیحات و بابت:</label>
                 <input
                   type="text"
@@ -2000,7 +2025,7 @@ export const EmployeesView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={payoutSaving}
+                  disabled={payoutSaving || selectedCommissionIds.length === 0}
                   className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 font-bold text-white shadow-lg shadow-emerald-600/30 hover:opacity-95 transition"
                 >
                   {payoutSaving ? "در حال ثبت پرداخت..." : "تأیید و صدور سند پرداخت"}

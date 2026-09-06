@@ -24,9 +24,8 @@ export interface NeshanCustomer {
 interface NeshanMapProps {
   customers: NeshanCustomer[];
   selectedId?: string | null;
-  onSelectCustomer?: (customer: NeshanCustomer) => void;
+  onSelectCustomer?: (customer: NeshanCustomer | null) => void;
   height?: string;
-  neshanApiKey?: string;
 }
 
 const HEALTH_COLORS: Record<string, string> = {
@@ -59,7 +58,6 @@ export const NeshanMap: React.FC<NeshanMapProps> = ({
   selectedId,
   onSelectCustomer,
   height = "560px",
-  neshanApiKey,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -70,6 +68,7 @@ export const NeshanMap: React.FC<NeshanMapProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchMessage, setSearchMessage] = useState("");
   const [mapLayer, setMapLayer] = useState<"standard" | "satellite">("standard");
 
   const validCustomers = customers.filter(
@@ -81,6 +80,10 @@ export const NeshanMap: React.FC<NeshanMapProps> = ({
       !isNaN(Number(c.latitude)) &&
       !isNaN(Number(c.longitude))
   );
+
+  useEffect(() => {
+    if (!selectedId) setActiveCustomer(null);
+  }, [selectedId]);
 
   // Initialize Leaflet Map dynamically
   useEffect(() => {
@@ -229,19 +232,22 @@ export const NeshanMap: React.FC<NeshanMapProps> = ({
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
+    setSearchMessage("");
     try {
       const center = mapRef.current?.getCenter() || { lat: 35.6892, lng: 51.3890 };
-      const keyParam = neshanApiKey ? `&apiKey=${encodeURIComponent(neshanApiKey)}` : "";
-      const res = await fetch(`/api/maps/neshan?action=search&term=${encodeURIComponent(searchQuery)}&lat=${center.lat}&lng=${center.lng}${keyParam}`);
+      const res = await fetch(`/api/maps/neshan?action=search&term=${encodeURIComponent(searchQuery)}&lat=${center.lat}&lng=${center.lng}`);
       const data = await res.json();
       if (data.success && data.items && data.items.length > 0) {
         setSearchResults(data.items);
       } else {
         const matchingCities = IRAN_CITIES.filter((c) => c.name.includes(searchQuery));
         setSearchResults(matchingCities.map((c) => ({ title: c.name, location: { x: c.lng, y: c.lat } })));
+        setSearchMessage(!data.success ? "جستجوی نقشه انجام نشد؛ تنظیمات API نشان را بررسی کنید." : matchingCities.length === 0 ? "نتیجه‌ای پیدا نشد." : "");
       }
     } catch (e) {
       console.warn("Search error:", e);
+      setSearchResults([]);
+      setSearchMessage("جستجوی نقشه انجام نشد؛ تنظیمات API نشان را بررسی کنید.");
     } finally {
       setSearching(false);
     }
@@ -280,7 +286,12 @@ export const NeshanMap: React.FC<NeshanMapProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSearch();
+                }
+              }}
               placeholder="جستجوی خیابان یا محله در نشان..."
               className="w-full rounded-xl border border-slate-700 bg-slate-900 pr-9 pl-16 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
             />
@@ -315,6 +326,7 @@ export const NeshanMap: React.FC<NeshanMapProps> = ({
               ))}
             </div>
           )}
+          {searchMessage && <p className="mt-1 text-[11px] text-amber-300">{searchMessage}</p>}
         </div>
       </div>
 
@@ -414,7 +426,10 @@ export const NeshanMap: React.FC<NeshanMapProps> = ({
                 بلد
               </a>
               <button
-                onClick={() => setActiveCustomer(null)}
+                onClick={() => {
+                  setActiveCustomer(null);
+                  onSelectCustomer?.(null);
+                }}
                 className="rounded-xl border border-slate-700 p-2 text-slate-400 hover:text-white hover:bg-slate-800"
               >
                 <X className="h-4 w-4" />

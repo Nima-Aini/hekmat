@@ -61,6 +61,10 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [invoicePagination, setInvoicePagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -214,14 +218,20 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
   const fetchData = async () => {
     setLoading(true);
     try {
-      const projParam = selectedProjectId ? `?projectId=${selectedProjectId}` : "";
+      const invoiceParams = new URLSearchParams({
+        page: String(invoicePage), pageSize: "20", sortBy, sortOrder,
+        ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
+        ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+        ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+        ...(paymentFilter !== "all" ? { paymentStatus: paymentFilter } : {}),
+      });
       const firstCustomersPage = await fetch("/api/customers?page=1&pageSize=100").then((r) => r.json());
       const customerPages = firstCustomersPage.success && firstCustomersPage.pagination?.totalPages > 1
         ? await Promise.all(Array.from({ length: Math.min(firstCustomersPage.pagination.totalPages - 1, 49) }, (_, index) => fetch(`/api/customers?page=${index + 2}&pageSize=100`).then((r) => r.json())))
         : [];
       const custRes = { ...firstCustomersPage, customers: [ ...(firstCustomersPage.customers || []), ...customerPages.flatMap((page) => page.success ? (page.customers || []) : []) ] };
       const [invRes, projRes, prodRes, accRes, empRes, settRes, specRes] = await Promise.all([
-        fetch(`/api/invoices${projParam}`).then((r) => r.json()),
+        fetch(`/api/invoices?${invoiceParams}`).then((r) => r.json()),
         fetch("/api/projects").then((r) => r.json()),
         fetch(selectedProjectId ? `/api/products?projectId=${selectedProjectId}` : "/api/products").then((r) => r.json()),
         fetch("/api/accounts").then((r) => r.json()),
@@ -230,7 +240,10 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         fetch("/api/special-products").then((r) => r.json()),
       ]);
 
-      if (invRes.success) setInvoices(invRes.invoices || []);
+      if (invRes.success) {
+        setInvoices(invRes.invoices || []);
+        setInvoicePagination(invRes.pagination || { page: invoicePage, pageSize: 20, total: 0, totalPages: 1 });
+      }
       if (custRes.success) setCustomers(custRes.customers || []);
       if (projRes.success) setProjects(projRes.projects || []);
       if (prodRes.success) setProducts(prodRes.products || []);
@@ -261,7 +274,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
 
     window.addEventListener("akma:settings-updated", handleSettingsUpdate);
     return () => window.removeEventListener("akma:settings-updated", handleSettingsUpdate);
-  }, [selectedProjectId]);
+  }, [selectedProjectId, invoicePage, sortBy, sortOrder, searchQuery, statusFilter, paymentFilter]);
 
   const loadProductsForProject = async (projId: string) => {
     try {
@@ -631,6 +644,15 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     }
   };
 
+  useEffect(() => {
+    const handleNavigation = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; id?: string }>).detail;
+      if (detail?.type === "invoice" && detail.id) openViewInvoice({ id: detail.id });
+    };
+    window.addEventListener("akma:navigate-item", handleNavigation);
+    return () => window.removeEventListener("akma:navigate-item", handleNavigation);
+  }, []);
+
   const addInvoicePayment = async () => {
     if (!editingInvoice || !paymentForm.accountId || paymentForm.amount <= 0) {
       return alert("مبلغ و حساب واریزی را به درستی مشخص نمایید.");
@@ -706,17 +728,21 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     return Math.max(0, sub - (form.invoiceDiscount || 0));
   };
 
-  const filteredInvoices = invoices.filter((inv) => {
-    const matchQuery =
-      inv.invoiceNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inv.customerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inv.employeeName?.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredInvoices = invoices;
 
-    const matchStatus = statusFilter === "all" || inv.status === statusFilter;
-    const matchPayment = paymentFilter === "all" || inv.paymentStatus === paymentFilter;
-
-    return matchQuery && matchStatus && matchPayment;
-  });
+  const changeSort = (column: string) => {
+    setInvoicePage(1);
+    if (sortBy === column) setSortOrder((current) => current === "asc" ? "desc" : "asc");
+    else {
+      setSortBy(column);
+      setSortOrder(column === "invoiceNumber" || column === "store" || column === "employee" ? "asc" : "desc");
+    }
+  };
+  const sortLabel = (column: string, label: string) => (
+    <button type="button" onClick={() => changeSort(column)} className="inline-flex items-center gap-1 hover:text-white">
+      {label}{sortBy === column ? (sortOrder === "asc" ? " ↑" : " ↓") : ""}
+    </button>
+  );
 
   const paymentStatusLabel = (invoice: any) => {
     if (invoice.status === "cancelled" || invoice.status === "reversed") return "ابطال شده";
@@ -795,7 +821,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
             type="text"
             placeholder="جستجو بر اساس شماره فاکتور، نام خریدار یا ویزیتور..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => { setSearchQuery(e.target.value); setInvoicePage(1); }}
             className="w-full rounded-2xl border border-slate-800 bg-slate-950 py-2.5 pr-10 pl-4 text-xs text-white placeholder-slate-500 focus:border-purple-500 focus:outline-none"
           />
         </div>
@@ -803,7 +829,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         <div>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setStatusFilter(e.target.value); setInvoicePage(1); }}
             className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-xs text-slate-300 focus:border-purple-500 focus:outline-none"
           >
             <option value="all">همه وضعیت‌ها (صادر/ابطال)</option>
@@ -816,7 +842,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         <div>
           <select
             value={paymentFilter}
-            onChange={(e) => setPaymentFilter(e.target.value)}
+            onChange={(e) => { setPaymentFilter(e.target.value); setInvoicePage(1); }}
             className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-xs text-slate-300 focus:border-purple-500 focus:outline-none"
           >
             <option value="all">همه وضعیت‌های تسویه</option>
@@ -825,6 +851,19 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
             <option value="unpaid">کاملاً تسویه نشده (بدهکار)</option>
           </select>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2 md:hidden">
+        <select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setInvoicePage(1); }} className="flex-1 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white">
+          <option value="createdAt">جدیدترین ثبت</option><option value="invoiceDate">تاریخ فاکتور</option>
+          <option value="grandTotal">مبلغ کل</option><option value="balanceDue">مانده بدهی</option>
+          <option value="employee">ویزیتور</option><option value="store">نام فروشگاه</option>
+          <option value="invoiceNumber">شماره فاکتور</option><option value="status">وضعیت فاکتور</option>
+          <option value="paymentStatus">وضعیت تسویه</option>
+        </select>
+        <button type="button" onClick={() => setSortOrder((value) => value === "asc" ? "desc" : "asc")} className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white">
+          {sortOrder === "asc" ? "صعودی ↑" : "نزولی ↓"}
+        </button>
       </div>
 
       {/* Invoices List */}
@@ -890,14 +929,16 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           <table className="w-full text-right text-xs text-slate-300">
             <thead className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-semibold">
               <tr>
-                <th className="py-3.5 px-4">شماره فاکتور</th>
-                <th className="py-3.5 px-4">خریدار / فروشگاه</th>
-                <th className="py-3.5 px-4">ویزیتور / مسئول فروش</th>
+                <th className="py-3.5 px-4">{sortLabel("invoiceNumber", "شماره فاکتور")}</th>
+                <th className="py-3.5 px-4">{sortLabel("store", "خریدار / فروشگاه")}</th>
+                <th className="py-3.5 px-4">{sortLabel("employee", "ویزیتور / مسئول فروش")}</th>
                 <th className="py-3.5 px-4">پروژه</th>
-                <th className="py-3.5 px-4">مبلغ کل (تومان)</th>
-                <th className="py-3.5 px-4">تسویه شده / مانده</th>
-                <th className="py-3.5 px-4">تاریخ صدور</th>
-                <th className="py-3.5 px-4 text-center">وضعیت</th>
+                <th className="py-3.5 px-4">{sortLabel("grandTotal", "مبلغ کل (تومان)")}</th>
+                <th className="py-3.5 px-4">{sortLabel("balanceDue", "تسویه شده / مانده")}</th>
+                <th className="py-3.5 px-4">{sortLabel("invoiceDate", "تاریخ صدور")}</th>
+                <th className="py-3.5 px-4 text-center">
+                  <div className="flex flex-col items-center gap-1">{sortLabel("status", "وضعیت سند")}{sortLabel("paymentStatus", "وضعیت تسویه")}</div>
+                </th>
                 <th className="py-3.5 px-4 text-center">عملیات</th>
               </tr>
             </thead>
@@ -982,6 +1023,13 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
             </tbody>
           </table>
         </div>
+        <div className="flex items-center justify-between border-t border-slate-800 px-4 py-3 text-xs text-slate-400">
+          <span>{invoicePagination.total.toLocaleString("fa-IR")} فاکتور — صفحه {invoicePagination.page.toLocaleString("fa-IR")} از {invoicePagination.totalPages.toLocaleString("fa-IR")}</span>
+          <div className="flex gap-2">
+            <button disabled={invoicePage <= 1} onClick={() => setInvoicePage((page) => page - 1)} className="rounded-lg border border-slate-700 px-3 py-1.5 disabled:opacity-40">قبلی</button>
+            <button disabled={invoicePage >= invoicePagination.totalPages} onClick={() => setInvoicePage((page) => page + 1)} className="rounded-lg border border-slate-700 px-3 py-1.5 disabled:opacity-40">بعدی</button>
+          </div>
+        </div>
       </div>
 
       {/* Modal 1: Create Invoice */}
@@ -990,9 +1038,6 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsAddModalOpen(false);
-          }}
         >
           <div className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-6 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -1292,9 +1337,6 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setReversingInvoice(null);
-          }}
         >
           <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1352,9 +1394,6 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setDeletingInvoice(null);
-          }}
         >
           <div className="w-full max-w-md rounded-3xl border border-rose-900/50 bg-slate-950 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1404,9 +1443,6 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEditingInvoice(null);
-          }}
         >
           <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-6 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -1563,9 +1599,6 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           role="dialog"
           aria-modal="true"
           className="app-modal invoice-preview-modal fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md overflow-y-auto print:p-0 print:m-0 print:bg-white print:static"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setViewingInvoice(null);
-          }}
         >
           <div className="w-full max-w-[940px] rounded-3xl border border-slate-300 bg-white p-6 md:p-8 text-slate-900 shadow-2xl my-6 space-y-6">
             {/* Top Toolbar */}
@@ -1666,9 +1699,6 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEditingFullInvoice(null);
-          }}
         >
           <div className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-6 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">

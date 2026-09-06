@@ -87,6 +87,17 @@ export const RawMaterialsView: React.FC = () => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    const handleNavigation = async (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; id?: string }>).detail;
+      if (detail?.type !== "raw_material" || !detail.id) return;
+      const response = await fetch(`/api/raw-materials/${detail.id}`).then((result) => result.json());
+      if (response.success && response.rawMaterial) openEditModal(response.rawMaterial);
+    };
+    window.addEventListener("akma:navigate-item", handleNavigation);
+    return () => window.removeEventListener("akma:navigate-item", handleNavigation);
+  }, []);
+
   const generateNextCode = () => {
     const existingCodes = new Set(materials.map((m) => m.code));
     let num = materials.length + 1;

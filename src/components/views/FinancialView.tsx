@@ -852,9 +852,6 @@ export const FinancialView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsAccountModalOpen(false);
-          }}
         >
           <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -989,9 +986,6 @@ export const FinancialView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsExpenseModalOpen(false);
-          }}
         >
           <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">

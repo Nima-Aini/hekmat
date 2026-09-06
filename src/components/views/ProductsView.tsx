@@ -79,6 +79,15 @@ export const ProductsView: React.FC = () => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    const handleNavigation = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; id?: string }>).detail;
+      if (detail?.type === "product" && detail.id) openEditProduct({ id: detail.id });
+    };
+    window.addEventListener("akma:navigate-item", handleNavigation);
+    return () => window.removeEventListener("akma:navigate-item", handleNavigation);
+  }, []);
+
   const openAddModal = () => {
     setFormData({
       code: "",

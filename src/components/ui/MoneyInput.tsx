@@ -43,6 +43,11 @@ export function parseFormattedNumber(val: string): number {
   return isNaN(num) ? 0 : num;
 }
 
+export function displayMoneyValue(value: number | string | undefined | null): string {
+  if (value === undefined || value === null || value === "" || value === 0 || value === "0") return "";
+  return formatThousands(value);
+}
+
 export const MoneyInput: React.FC<MoneyInputProps> = ({
   id,
   value,
@@ -57,16 +62,11 @@ export const MoneyInput: React.FC<MoneyInputProps> = ({
   autoFocus = false,
   allowDecimal = false,
 }) => {
-  const [displayValue, setDisplayValue] = useState<string>(() => {
-    if (value === undefined || value === null || value === 0 || value === "0") {
-      return value === 0 || value === "0" ? "0" : "";
-    }
-    return formatThousands(value);
-  });
+  const [displayValue, setDisplayValue] = useState<string>(() => displayMoneyValue(value));
 
   useEffect(() => {
-    if (value === undefined || value === null || value === "") {
-      setDisplayValue("");
+    if (value === undefined || value === null || value === "" || value === 0 || value === "0") {
+      setDisplayValue(displayMoneyValue(value));
     } else {
       const currentNumeric = parseFormattedNumber(displayValue);
       const incomingNumeric = Number(value);

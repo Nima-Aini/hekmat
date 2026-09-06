@@ -10,17 +10,12 @@ export const CustomerMapView: React.FC = () => {
   const [selectedHealth, setSelectedHealth] = useState("all");
   const [activeCustomer, setActiveCustomer] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [neshanApiKey, setNeshanApiKey] = useState("");
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [custRes, settRes] = await Promise.all([
-        fetch("/api/customers?pageSize=100").then((x) => x.json()),
-        fetch("/api/settings").then((x) => x.json()),
-      ]);
+      const custRes = await fetch("/api/customers?pageSize=100").then((x) => x.json());
       if (custRes.success) setCustomers(custRes.customers || []);
-      if (settRes?.success && settRes.settings) setNeshanApiKey(settRes.settings.neshanApiKey || "");
     } catch (err) {
       console.error("Error fetching map customers:", err);
     } finally {
@@ -121,7 +116,6 @@ export const CustomerMapView: React.FC = () => {
         selectedId={activeCustomer?.id}
         onSelectCustomer={setActiveCustomer}
         height="560px"
-        neshanApiKey={neshanApiKey}
       />
     </div>
   );

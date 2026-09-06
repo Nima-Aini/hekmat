@@ -92,6 +92,17 @@ export const ProjectManagementView: React.FC = () => {
     load();
   }, []);
 
+  useEffect(() => {
+    const handleNavigation = async (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; id?: string }>).detail;
+      if (detail?.type !== "project" || !detail.id) return;
+      const response = await fetch(`/api/projects/${detail.id}`).then((result) => result.json());
+      if (response.success && response.project) openProject(response.project);
+    };
+    window.addEventListener("akma:navigate-item", handleNavigation);
+    return () => window.removeEventListener("akma:navigate-item", handleNavigation);
+  }, []);
+
   const openProject = async (p: any) => {
     setSelected(p);
     setTab("overview");
@@ -329,9 +340,6 @@ export const ProjectManagementView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 md:p-6 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setSelected(null);
-          }}
         >
           <div className="max-w-6xl mx-auto rounded-3xl bg-slate-950 border border-slate-800 p-5 md:p-7 space-y-5 my-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -594,9 +602,6 @@ export const ProjectManagementView: React.FC = () => {
           role="dialog"
           aria-modal="true"
           className="app-modal fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShow(false);
-          }}
         >
           <form
             onSubmit={save}

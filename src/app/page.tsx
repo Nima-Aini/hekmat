@@ -60,7 +60,7 @@ export default function HomePage() {
       case "tax_declaration":
         return <ReportsView selectedProjectId={selectedProjectId} initialTab="tax_declaration" />;
       case "alerts":
-        return <AlertsView selectedProjectId={selectedProjectId} />;
+        return <AlertsView selectedProjectId={selectedProjectId} onNavigate={setActiveTab} />;
       case "ai":
         return <AiAssistantView selectedProjectId={selectedProjectId} />;
       case "backup":

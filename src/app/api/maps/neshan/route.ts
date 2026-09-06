@@ -6,12 +6,11 @@ import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-const DEFAULT_NESHAN_KEY = "service.3a9a6b9c59054a20a4786affab22c5d7";
+// Production compatibility fallback. Rotate this exposed legacy key and set NESHAN_API_KEY,
+// then remove the fallback in a separately coordinated deployment.
+const LEGACY_NESHAN_KEY = "service.3a9a6b9c59054a20a4786affab22c5d7";
 
-async function getNeshanKey(providedKey?: string | null): Promise<string> {
-  if (providedKey && providedKey.trim().length > 5) {
-    return providedKey.trim();
-  }
+async function getNeshanKey(): Promise<string> {
   if (process.env.NESHAN_API_KEY) {
     return process.env.NESHAN_API_KEY;
   }
@@ -27,7 +26,7 @@ async function getNeshanKey(providedKey?: string | null): Promise<string> {
   } catch (e) {
     console.error("Error reading neshanApiKey from DB:", e);
   }
-  return DEFAULT_NESHAN_KEY;
+  return LEGACY_NESHAN_KEY;
 }
 
 export async function GET(req: Request) {
@@ -35,19 +34,21 @@ export async function GET(req: Request) {
     if (!await getEmployeeContext()) throw new ApiError(401, "ابتدا وارد حساب کاربری شوید.");
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action") || "search";
-    const customKey = searchParams.get("apiKey");
-    const apiKey = await getNeshanKey(customKey);
+    const apiKey = await getNeshanKey();
 
     if (action === "search") {
       const term = searchParams.get("term") || searchParams.get("q") || "";
-      const lat = searchParams.get("lat") || "35.6892";
-      const lng = searchParams.get("lng") || "51.3890";
+      const latNumber = Number(searchParams.get("lat") || "35.6892");
+      const lngNumber = Number(searchParams.get("lng") || "51.3890");
+      if (!Number.isFinite(latNumber) || !Number.isFinite(lngNumber) || Math.abs(latNumber) > 90 || Math.abs(lngNumber) > 180) {
+        throw new ApiError(400, "مختصات جستجو نامعتبر است.");
+      }
 
       if (!term.trim()) {
         return NextResponse.json({ success: true, count: 0, items: [] });
       }
 
-      const neshanUrl = `https://api.neshan.org/v1/search?term=${encodeURIComponent(term)}&lat=${lat}&lng=${lng}`;
+      const neshanUrl = `https://api.neshan.org/v1/search?term=${encodeURIComponent(term)}&lat=${latNumber}&lng=${lngNumber}`;
       const res = await fetch(neshanUrl, {
         headers: {
           "Api-Key": apiKey,
@@ -59,9 +60,9 @@ export async function GET(req: Request) {
         console.warn("Neshan Search API error response:", res.status, errText);
         return NextResponse.json({
           success: false,
-          error: `Neshan API HTTP ${res.status}`,
+          error: "جستجوی نقشه انجام نشد؛ تنظیمات API نشان را بررسی کنید.",
           items: [],
-        }, { status: 200 });
+        }, { status: 502 });
       }
 
       const data = await res.json();
@@ -76,11 +77,13 @@ export async function GET(req: Request) {
       const lat = searchParams.get("lat");
       const lng = searchParams.get("lng");
 
-      if (!lat || !lng) {
+      const latNumber = Number(lat);
+      const lngNumber = Number(lng);
+      if (!lat || !lng || !Number.isFinite(latNumber) || !Number.isFinite(lngNumber) || Math.abs(latNumber) > 90 || Math.abs(lngNumber) > 180) {
         return NextResponse.json({ success: false, error: "lat و lng الزامی هستند." }, { status: 400 });
       }
 
-      const neshanUrl = `https://api.neshan.org/v5/reverse?lat=${lat}&lng=${lng}`;
+      const neshanUrl = `https://api.neshan.org/v5/reverse?lat=${latNumber}&lng=${lngNumber}`;
       const res = await fetch(neshanUrl, {
         headers: {
           "Api-Key": apiKey,
@@ -92,8 +95,8 @@ export async function GET(req: Request) {
         console.warn("Neshan Reverse API error response:", res.status, errText);
         return NextResponse.json({
           success: false,
-          error: `Neshan Reverse API HTTP ${res.status}`,
-        }, { status: 200 });
+          error: "دریافت نشانی از سرویس نقشه انجام نشد.",
+        }, { status: 502 });
       }
 
       const data = await res.json();

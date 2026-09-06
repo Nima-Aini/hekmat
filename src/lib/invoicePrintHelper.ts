@@ -70,6 +70,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
   const paidNum = Number(invoice.paidAmount) || 0;
   const balanceNum = Number(invoice.balanceDue) || 0;
   const settlementLine = invoice.settlementDate ? `<div style="margin-top: 3px;"><span style="color: #475569;">تاریخ تسویه: </span><strong style="color: #0f172a;">${toJalaliDate(invoice.settlementDate)}</strong></div>` : "";
+  const buyerName = escapeHtml(invoice.customerStore || invoice.customerName || "—");
 
   const sellerName = escapeHtml(sellerInfo?.businessName || "سازمان و صنایع بازرگانی حکمت آکما");
   const economicCode = escapeHtml(sellerInfo?.economicCode || "");
@@ -333,9 +334,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       </div>
       <div class="info-card">
         <div class="card-title">مشخصات خریدار</div>
-        <div><span style="color: #475569;">نام خریدار / فروشگاه: </span><strong style="color: #0f172a;">${escapeHtml(invoice.customerName || "—")} ${invoice.customerStore ? `(${escapeHtml(invoice.customerStore)})` : ""}</strong></div>
-        <div><span style="color: #475569;">شماره تماس: </span><span style="color: #0f172a; font-weight: bold;">${escapeHtml(invoice.customerMobile || "—")}</span></div>
-        <div><span style="color: #475569;">نشانی: </span><span style="color: #0f172a;">${escapeHtml(invoice.customerAddress || "تهران - تحویل حضوری")}</span></div>
+        <div><span style="color: #475569;">خریدار / فروشگاه: </span><strong style="color: #0f172a;">${buyerName}</strong></div>
       </div>
     </div>
 

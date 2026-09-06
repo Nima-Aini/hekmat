@@ -22,8 +22,12 @@ export async function getEmployeeDashboard(employeeId: string, period = "month")
   const [{ value: sales = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${invoices.grandTotal}),0)` }).from(invoices).where(eq(invoices.employeeId, employeeId));
   const { start, end } = dateRange(period);
   const [{ value: periodSales = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${invoices.grandTotal}),0)` }).from(invoices).where(and(eq(invoices.employeeId, employeeId), gte(invoices.invoiceDate, start), lte(invoices.invoiceDate, end), eq(invoices.status, "issued")));
-  const [{ value: periodCommission = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${commissionLedger.commissionAmount}),0)` }).from(commissionLedger).where(and(eq(commissionLedger.employeeId, employeeId), gte(commissionLedger.createdAt, start), lte(commissionLedger.createdAt, end), sql`${commissionLedger.status} <> 'reversed'`));
-  const [{ value: paidCommission = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${commissionLedger.commissionAmount}),0)` }).from(commissionLedger).where(and(eq(commissionLedger.employeeId, employeeId), eq(commissionLedger.status, "paid")));
+  const [{ value: periodCommission = "0" } = {}] = await db.select({
+    value: sql<string>`COALESCE(SUM(CASE WHEN ${commissionLedger.commissionAmount} > 0 AND ${commissionLedger.commissionType} <> 'payout' THEN ${commissionLedger.commissionAmount} ELSE 0 END),0)`
+  }).from(commissionLedger).where(and(eq(commissionLedger.employeeId, employeeId), gte(commissionLedger.createdAt, start), lte(commissionLedger.createdAt, end), sql`${commissionLedger.status} <> 'reversed'`));
+  const [{ value: paidCommission = "0" } = {}] = await db.select({
+    value: sql<string>`COALESCE(SUM(CASE WHEN ${commissionLedger.commissionType} = 'payout' OR ${commissionLedger.commissionAmount} < 0 THEN ABS(${commissionLedger.commissionAmount}) WHEN ${commissionLedger.status} = 'paid' AND ${commissionLedger.paymentId} IS NOT NULL THEN ${commissionLedger.commissionAmount} ELSE 0 END),0)`
+  }).from(commissionLedger).where(eq(commissionLedger.employeeId, employeeId));
   const [{ count: customersCount = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(customers).where(eq(customers.assignedEmployeeId, employeeId));
   const [{ count: activeCustomers = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(customers).where(and(eq(customers.assignedEmployeeId, employeeId), eq(customers.status, "active")));
   const [{ count: riskyCustomers = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(customers).where(and(eq(customers.assignedEmployeeId, employeeId), or(eq(customers.healthStatus, "red"), eq(customers.healthStatus, "yellow"))));
