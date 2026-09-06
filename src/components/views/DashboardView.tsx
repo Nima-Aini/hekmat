@@ -26,7 +26,7 @@ import {
   BarChart,
   Bar
 } from "recharts";
-import { toJalaliDate } from "@/lib/dateUtils";
+import { getJalaliPresetRange, gregorianToJalali, jalaliToString, parseJalaliString, toJalaliDate } from "@/lib/dateUtils";
 
 interface DashboardProps {
   selectedProjectId: string | null;
@@ -38,15 +38,21 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
   const [salesReport, setSalesReport] = useState<any>(null);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const initialRange = getJalaliPresetRange("this_month")!;
+  const [preset, setPreset] = useState("this_month");
+  const [dateRange, setDateRange] = useState({ start: initialRange.start.toISOString(), end: initialRange.end.toISOString() });
+  const [customStart, setCustomStart] = useState(jalaliToString(gregorianToJalali(initialRange.start)));
+  const [customEnd, setCustomEnd] = useState(jalaliToString(gregorianToJalali(initialRange.end)));
 
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
+      const rangeParam = `&startDate=${encodeURIComponent(dateRange.start)}&endDate=${encodeURIComponent(dateRange.end)}`;
       const projParam = selectedProjectId ? `&projectId=${selectedProjectId}` : "";
       const [dashRes, salesRes, alertRes] = await Promise.all([
-        fetch(`/api/reports?type=dashboard${projParam}`).then((r) => r.json()),
-        fetch(`/api/reports?type=sales${projParam}`).then((r) => r.json()),
-        fetch(`/api/alerts${selectedProjectId ? "?projectId=" + selectedProjectId : ""}`).then((r) => r.json()),
+        fetch(`/api/reports?type=dashboard${projParam}${rangeParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=sales${projParam}${rangeParam}`).then((r) => r.json()),
+        fetch(`/api/alerts?page=1&pageSize=20&status=unresolved${selectedProjectId ? "&projectId=" + selectedProjectId : ""}`).then((r) => r.json()),
       ]);
 
       if (dashRes.success) setData(dashRes.data);
@@ -61,9 +67,26 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
 
   useEffect(() => {
     fetchDashboardData();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, dateRange.start, dateRange.end]);
 
-  if (loading) {
+  const applyPreset = (value: string) => {
+    setPreset(value);
+    const range = getJalaliPresetRange(value);
+    if (!range) return;
+    setDateRange({ start: range.start.toISOString(), end: range.end.toISOString() });
+    setCustomStart(jalaliToString(gregorianToJalali(range.start)));
+    setCustomEnd(jalaliToString(gregorianToJalali(range.end)));
+  };
+
+  const applyCustomRange = () => {
+    const start = parseJalaliString(customStart);
+    const end = parseJalaliString(customEnd);
+    if (!start || !end || start > end) return alert("بازه تاریخ شمسی نامعتبر است.");
+    setPreset("custom");
+    setDateRange({ start: start.toISOString(), end: end.toISOString() });
+  };
+
+  if (loading && !data) {
     return (
       <div className="flex h-96 items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -94,6 +117,13 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 lg:flex-row lg:items-end">
+        <label className="text-xs text-slate-300">بازه داشبورد<select value={preset} onChange={(e) => applyPreset(e.target.value)} className="mt-1 w-full rounded-xl bg-slate-950 p-2.5 text-white"><option value="today">امروز</option><option value="this_week">این هفته</option><option value="this_month">این ماه</option><option value="last_3_months">سه ماه اخیر</option><option value="last_6_months">شش ماه اخیر</option><option value="this_year">سال جاری شمسی</option><option value="custom">بازه دلخواه</option></select></label>
+        <label className="text-xs text-slate-300">شروع شمسی<input value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="mt-1 w-full rounded-xl bg-slate-950 p-2.5 font-mono text-white" placeholder="1405/01/01" /></label>
+        <label className="text-xs text-slate-300">پایان شمسی<input value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="mt-1 w-full rounded-xl bg-slate-950 p-2.5 font-mono text-white" placeholder="1405/12/29" /></label>
+        <button onClick={applyCustomRange} className="rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold">اعمال بازه</button>
+        {loading && <RefreshCw className="mb-2 h-4 w-4 animate-spin text-purple-400" aria-label="به‌روزرسانی" />}
+      </div>
       {/* Alert Header Banner if active alerts exist */}
       {alerts.length > 0 && (
         <div className="flex flex-col gap-3 rounded-2xl border border-rose-500/30 bg-rose-950/20 p-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
@@ -134,11 +164,12 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
             </h3>
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-            <span>تعداد فاکتورها: {kpis.invoiceCount}</span>
+            <span>{kpis.invoiceCount} فاکتور · میانگین {Math.round(kpis.averageInvoiceValue || 0).toLocaleString("fa-IR")}</span>
             <NeonBadge variant="blue" size="sm">
               عملیاتی
             </NeonBadge>
           </div>
+          {kpis.salesChangePercent !== null && <div className={`mt-2 text-[10px] ${kpis.salesChangePercent >= 0 ? "text-emerald-400" : "text-rose-400"}`}>تغییر نسبت به دوره قبل: {kpis.salesChangePercent.toLocaleString("fa-IR")}%</div>}
         </div>
 
         {/* Real Gross Profit */}
@@ -199,17 +230,23 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
               <span className="font-semibold text-emerald-400">{kpis.totalLiquidity.toLocaleString("fa-IR")}</span>
             </div>
             <div className="flex justify-between text-xs">
-              <span className="text-slate-400">مطالبات سررسیده:</span>
-              <span className="font-semibold text-rose-400">{kpis.totalReceivable.toLocaleString("fa-IR")}</span>
+              <span className="text-slate-400">مطالبات سررسیدگذشته:</span>
+              <span className="font-semibold text-rose-400">{(kpis.overdueReceivable || 0).toLocaleString("fa-IR")}</span>
             </div>
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-            <span>ارزش انبار: {kpis.totalInventoryValue.toLocaleString("fa-IR")}</span>
+            <span>وصول دوره: {(kpis.collectedInPeriod || 0).toLocaleString("fa-IR")} · نرخ {kpis.collectionRate || 0}%</span>
             <NeonBadge variant="yellow" size="sm">
               نقدینگی
             </NeonBadge>
           </div>
         </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-rose-500/20 bg-rose-950/20 p-4"><div className="text-xs text-slate-400">مواد اولیه زیر حداقل / بحرانی</div><div className="mt-1 text-xl font-black text-rose-300">{kpis.lowRawMaterialCount || 0} / {kpis.criticalRawMaterialCount || 0}</div></div>
+        <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/20 p-4"><div className="text-xs text-slate-400">ارزش مواد اولیه</div><div className="mt-1 text-xl font-black text-cyan-300">{Math.round(kpis.rawMaterialInventoryValue || 0).toLocaleString("fa-IR")} تومان</div></div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"><div className="text-xs text-slate-400">بیشترین کمبودها</div><div className="mt-2 space-y-1">{(kpis.topShortages || []).slice(0, 3).map((item: any) => <div key={item.id} className="flex justify-between text-[11px]"><span>{item.name}</span><span className="text-rose-300">کمبود {item.shortage.toLocaleString("fa-IR")}</span></div>)}</div></div>
       </div>
 
       {/* Main Sales & Profit Trend Chart */}
@@ -236,6 +273,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
                       <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                     </linearGradient>
+                    <linearGradient id="collectionGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#a855f7" stopOpacity={0.3} /><stop offset="95%" stopColor="#a855f7" stopOpacity={0} /></linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
                   <XAxis dataKey="jalaliDate" stroke="#94a3b8" fontSize={11} />
@@ -246,6 +284,8 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
                   />
                   <Area type="monotone" dataKey="sales" name="فروش" stroke="#3b82f6" fillOpacity={1} fill="url(#salesGrad)" />
                   <Area type="monotone" dataKey="profit" name="سود" stroke="#10b981" fillOpacity={1} fill="url(#profitGrad)" />
+                  <Area type="monotone" dataKey="collected" name="وصول منتسب به فاکتورها" stroke="#a855f7" fillOpacity={1} fill="url(#collectionGrad)" />
+                  <Area type="monotone" dataKey="receivable" name="مانده مطالبات" stroke="#f59e0b" fillOpacity={0} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (

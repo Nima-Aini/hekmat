@@ -377,6 +377,43 @@ export async function migrateDatabase() {
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS commission_payment_allocations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      commission_ledger_id UUID NOT NULL REFERENCES commission_ledger(id),
+      payment_id UUID NOT NULL REFERENCES payments(id),
+      amount NUMERIC(15,2) NOT NULL CHECK (amount > 0),
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      CONSTRAINT uniq_commission_payment_allocation UNIQUE (commission_ledger_id, payment_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      request_key TEXT UNIQUE,
+      request_hash TEXT,
+      order_number TEXT NOT NULL UNIQUE,
+      customer_id UUID NOT NULL REFERENCES customers(id),
+      project_id UUID REFERENCES projects(id),
+      employee_id UUID REFERENCES employees(id),
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','ready','converted','cancelled')),
+      delivery_date TIMESTAMP,
+      notes TEXT,
+      converted_invoice_id UUID UNIQUE REFERENCES invoices(id),
+      created_by_id TEXT NOT NULL DEFAULT 'system_user',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS order_items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      product_id UUID NOT NULL REFERENCES products(id),
+      product_name_snapshot TEXT NOT NULL,
+      quantity NUMERIC(15,4) NOT NULL CHECK (quantity > 0),
+      unit_price_snapshot NUMERIC(15,2) NOT NULL CHECK (unit_price_snapshot >= 0),
+      notes TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS payroll_records (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       employee_id UUID NOT NULL REFERENCES employees(id),
@@ -478,6 +515,14 @@ export async function migrateDatabase() {
 
     ALTER TABLE audit_logs
       ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'system_user';
+    ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id);
+    ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS parent_log_id UUID;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id);
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by_id TEXT DEFAULT 'system_user';
+    UPDATE tasks SET created_by_id = 'system_user' WHERE created_by_id IS NULL;
+    ALTER TABLE tasks ALTER COLUMN created_by_id SET DEFAULT 'system_user';
+    ALTER TABLE tasks ALTER COLUMN created_by_id SET NOT NULL;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
 
     ALTER TABLE backups
       ADD COLUMN IF NOT EXISTS checksum TEXT DEFAULT 'legacy';
@@ -964,8 +1009,8 @@ export async function migrateDatabase() {
 
     INSERT INTO permissions(code, name) VALUES
       ('customers.view','مشاهده مشتریان'),('customers.create','ایجاد مشتری'),('customers.update','ویرایش مشتری'),
-      ('customers.archive','آرشیو مشتری'),('orders.view','مشاهده سفارش'),('orders.create','ثبت سفارش'),('invoices.create','ایجاد فاکتور'),('invoices.update','ویرایش فاکتور'),
-      ('orders.update','ویرایش سفارش'),('orders.cancel','لغو سفارش'),('invoices.view','مشاهده فاکتور'),
+      ('customers.archive','آرشیو مشتری'),('orders.view','مشاهده سفارش'),('orders.create','ثبت سفارش'),('orders.edit','ویرایش سفارش'),('orders.cancel','لغو سفارش'),('orders.convert','تبدیل سفارش به فاکتور'),('orders.manage','مدیریت سفارش'),('invoices.create','ایجاد فاکتور'),('invoices.update','ویرایش فاکتور'),
+      ('orders.update','ویرایش سفارش قدیمی'),('invoices.view','مشاهده فاکتور'),
       ('commissions.view','مشاهده پورسانت'),('commissions.manage','مدیریت پورسانت'),('reports.view','مشاهده گزارش'),('reports.export','خروجی گزارش'),('reports.simulate','شبیه‌سازی گزارش'),('cost.view','مشاهده قیمت خرید'),
       ('profit.view','مشاهده سود'),('projects.view','مشاهده پروژه'),('projects.update','تغییر پروژه'),
       ('customers.transfer','انتقال مشتری'),('employees.manage','مدیریت همکاران'),('employees.view','مشاهده همکاران'),('employees.offboard','収束 همکار'),('projects.create','ایجاد پروژه'),('projects.archive','آرشیو پروژه'),('projects.price.manage','مدیریت قیمت پروژه'),('projects.commission.manage','مدیریت پورسانت پروژه'),('projects.expense.manage','مدیریت هزینه پروژه'),('tasks.manage','مدیریت وظایف'),('payments.create','ثبت پرداخت'),('payments.view','مشاهده پرداخت'),
@@ -976,6 +1021,7 @@ export async function migrateDatabase() {
       ('expenses.view','مشاهده هزینه‌ها'),('expenses.create','ایجاد هزینه'),('expenses.edit','ویرایش هزینه'),('expenses.delete','حذف هزینه'),
       ('financial.view','مشاهده مالی'),('financial.edit','ویرایش مالی'),('financial.delete','حذف یا بایگانی حساب'),('admin.settings','تنظیمات مدیریتی'),
       ('alerts.view','مشاهده اعلان‌ها'),('alerts.resolve','حل اعلان‌ها'),
+      ('notes.view','مشاهده یادداشت‌ها'),('notes.create','ایجاد یادداشت'),('notes.update','ویرایش یادداشت'),('notes.complete','تکمیل یادداشت'),('audit.view','مشاهده لاگ فعالیت‌ها'),
       ('ai.view','مشاهده هوش مصنوعی'),('backup.view','مشاهده پشتیبان‌گیری'),('backup.create','ایجاد پشتیبان'),('settings.view','مشاهده تنظیمات'),
       ('global_search','جستجوی سراسری'),
       ('invoices.pay','ثبت وصول فاکتور'),('invoices.delete','حذف فاکتور'),('invoices.reverse','ابطال فاکتور')
@@ -991,7 +1037,7 @@ export async function migrateDatabase() {
       SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN ('customers.view','customers.create','customers.update','orders.view','orders.create','invoices.view','invoices.create','invoices.update','commissions.view','reports.view','projects.view','customers.transfer','payments.create') WHERE r.code='sales'
     ON CONFLICT DO NOTHING;
     INSERT INTO role_permissions(role_id, permission_id)
-      SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN ('customers.view','customers.create','customers.update','orders.view','orders.create','orders.update','orders.cancel','invoices.view','invoices.create','invoices.update','commissions.view','reports.view','cost.view','profit.view','projects.view','projects.create','projects.update','projects.price.manage','projects.commission.manage','projects.expense.manage','customers.transfer','payments.create','employees.view','employees.manage','expenses.view','expenses.create','expenses.edit','expenses.delete','purchases.view','purchases.create','purchases.edit','purchases.delete','alerts.view','alerts.resolve','production.create','financial.edit','admin.settings','backup.create','global_search','invoices.reverse','invoices.delete') WHERE r.code='manager'
+      SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN ('customers.view','customers.create','customers.update','orders.view','orders.create','orders.update','orders.edit','orders.cancel','orders.convert','orders.manage','notes.view','notes.create','notes.update','notes.complete','invoices.view','invoices.create','invoices.update','commissions.view','reports.view','cost.view','profit.view','projects.view','projects.create','projects.update','projects.price.manage','projects.commission.manage','projects.expense.manage','customers.transfer','payments.create','employees.view','employees.manage','expenses.view','expenses.create','expenses.edit','expenses.delete','purchases.view','purchases.create','purchases.edit','purchases.delete','alerts.view','alerts.resolve','production.create','financial.edit','admin.settings','backup.create','global_search','invoices.reverse','invoices.delete') WHERE r.code='manager'
     ON CONFLICT DO NOTHING;
     INSERT INTO role_permissions(role_id, permission_id)
       SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN ('customers.view','customers.create','customers.update','invoices.view','invoices.create','invoices.update','customers.transfer','payments.create','projects.view','reports.view','products.view','global_search') WHERE r.code='visitor'
@@ -1033,10 +1079,15 @@ export async function migrateDatabase() {
     CREATE INDEX IF NOT EXISTS idx_payments_project ON payments(project_id);
     CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date);
     CREATE INDEX IF NOT EXISTS idx_payments_type ON payments(payment_type);
+    CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_payments_account ON payments(account_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_allocations_invoice ON payment_allocations(invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id);
 
     CREATE INDEX IF NOT EXISTS idx_inventory_warehouse ON inventory_ledger(warehouse_id);
     CREATE INDEX IF NOT EXISTS idx_inventory_item ON inventory_ledger(item_type, item_id);
     CREATE INDEX IF NOT EXISTS idx_inventory_date ON inventory_ledger(created_at);
+    CREATE INDEX IF NOT EXISTS idx_inventory_reference ON inventory_ledger(reference_type, reference_id);
 
     CREATE INDEX IF NOT EXISTS idx_expenses_project ON expenses(project_id);
     CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
@@ -1048,14 +1099,21 @@ export async function migrateDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_commission_employee ON commission_ledger(employee_id);
     CREATE INDEX IF NOT EXISTS idx_commission_project ON commission_ledger(project_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_invoice ON commission_ledger(invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_employee_status ON commission_ledger(employee_id, status);
+    CREATE INDEX IF NOT EXISTS idx_commission_payment_allocation_ledger ON commission_payment_allocations(commission_ledger_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_payment_allocation_payment ON commission_payment_allocations(payment_id);
 
     CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
     CREATE INDEX IF NOT EXISTS idx_alerts_project ON alerts(project_id);
     CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts(type);
+    CREATE INDEX IF NOT EXISTS idx_alerts_status_created ON alerts(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_alerts_severity_status ON alerts(severity, status);
 
     CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id);
     CREATE INDEX IF NOT EXISTS idx_audit_date ON audit_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+    CREATE INDEX IF NOT EXISTS idx_audit_project_date ON audit_logs(project_id, created_at DESC);
 
     CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
     CREATE INDEX IF NOT EXISTS idx_customers_employee ON customers(assigned_employee_id);
@@ -1074,6 +1132,13 @@ export async function migrateDatabase() {
     CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
     CREATE INDEX IF NOT EXISTS idx_tasks_employee ON tasks(assigned_employee_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_due_status ON tasks(due_date, status);
+
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+    CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_project ON orders(project_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_employee ON orders(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 
     CREATE INDEX IF NOT EXISTS idx_consignments_customer ON consignments(customer_id);
     CREATE INDEX IF NOT EXISTS idx_consignments_project ON consignments(project_id);
@@ -1088,6 +1153,7 @@ export async function migrateDatabase() {
     ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS company_address TEXT;
     ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS company_phone TEXT;
     ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS tax_office TEXT;
+    ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS taxpayer_type TEXT DEFAULT 'legal';
     ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS tax_rate_corporate INTEGER DEFAULT 25;
     ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS vat_rate INTEGER DEFAULT 10;
 

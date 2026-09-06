@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { employeeAccounts, employees, roles } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { verifyPassword, signSession, ensureDefaultAdminAccount } from "@/services/employeeAuth";
+import { verifyPassword, signSession } from "@/services/employeeAuth";
+import { logAuditEvent } from "@/services/audit";
 
 export async function POST(req: Request) {
   try {
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
       .update(employeeAccounts)
       .set({ lastLoginAt: new Date(), updatedAt: new Date() })
       .where(eq(employeeAccounts.id, row.account.id));
+    await logAuditEvent("LOGIN", "employee_account", row.account.id, { employeeId: row.employee.id, roleCode: row.roleCode }, { userId: row.employee.id, userName: row.employee.name });
 
     const response = NextResponse.json({
       success: true,
@@ -57,4 +59,3 @@ export async function POST(req: Request) {
     return apiError(e);
   }
 }
-

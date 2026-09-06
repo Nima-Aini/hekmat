@@ -465,6 +465,40 @@ export const invoiceItems = pgTable("invoice_items", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Orders are operational documents only. They intentionally have no payment,
+// account or inventory-ledger relation until an atomic conversion to invoice.
+export const orders = pgTable("orders", {
+  requestKey: text("request_key").unique(),
+  requestHash: text("request_hash"),
+  id: uuid("id").defaultRandom().primaryKey(),
+  orderNumber: text("order_number").notNull().unique(),
+  customerId: uuid("customer_id").notNull().references(() => customers.id),
+  projectId: uuid("project_id").references(() => projects.id),
+  employeeId: uuid("employee_id").references(() => employees.id),
+  status: text("status").default("open").notNull(), // open, ready, converted, cancelled
+  deliveryDate: timestamp("delivery_date"),
+  notes: text("notes"),
+  convertedInvoiceId: uuid("converted_invoice_id").unique().references(() => invoices.id),
+  createdById: text("created_by_id").default("system_user").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_orders_status").on(t.status),
+  index("idx_orders_customer").on(t.customerId),
+  index("idx_orders_project").on(t.projectId),
+]);
+
+export const orderItems = pgTable("order_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  productId: uuid("product_id").notNull().references(() => products.id),
+  productNameSnapshot: text("product_name_snapshot").notNull(),
+  quantity: numeric("quantity", { precision: 15, scale: 4 }).notNull(),
+  unitPriceSnapshot: numeric("unit_price_snapshot", { precision: 15, scale: 2 }).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_order_items_order").on(t.orderId)]);
+
 // 11. Accounts & Financial Transactions & Payments
 export const accounts = pgTable("accounts", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -539,6 +573,20 @@ export const commissionLedger = pgTable("commission_ledger", {
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Additive allocation history enables collection-based, partial commission
+// payouts while preserving legacy commission_ledger.payment_id rows.
+export const commissionPaymentAllocations = pgTable("commission_payment_allocations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  commissionLedgerId: uuid("commission_ledger_id").notNull().references(() => commissionLedger.id),
+  paymentId: uuid("payment_id").notNull().references(() => payments.id),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("uniq_commission_payment_allocation").on(t.commissionLedgerId, t.paymentId),
+  index("idx_commission_payment_allocation_ledger").on(t.commissionLedgerId),
+  index("idx_commission_payment_allocation_payment").on(t.paymentId),
+]);
 
 export const payrollRecords = pgTable("payroll_records", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -620,11 +668,14 @@ export const tasks = pgTable("tasks", {
   title: text("title").notNull(),
   description: text("description"),
   assignedEmployeeId: uuid("assigned_employee_id").references(() => employees.id),
+  projectId: uuid("project_id").references(() => projects.id),
+  createdById: text("created_by_id").default("system_user").notNull(),
   entityType: text("entity_type"), // customer, invoice, alert, supplier, project
   entityId: uuid("entity_id"),
   dueDate: timestamp("due_date"),
   priority: text("priority").default("medium").notNull(), // low, medium, high
   status: text("status").default("open").notNull(), // open, in_progress, done, cancelled, overdue
+  completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -634,6 +685,8 @@ export const auditLogs = pgTable("audit_logs", {
   action: text("action").notNull(), // CREATE, UPDATE, DELETE, REVERSE, OFFBOARD, BACKUP, RESTORE
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id"),
+  projectId: uuid("project_id").references(() => projects.id),
+  parentLogId: uuid("parent_log_id"),
   userId: text("user_id").default("system_user"),
   userName: text("user_name").default("کاربر سیستم"),
   details: jsonb("details"),
@@ -661,6 +714,7 @@ export const systemSettings = pgTable("system_settings", {
   companyAddress: text("company_address"),
   companyPhone: text("company_phone"),
   taxOffice: text("tax_office"),
+  taxpayerType: text("taxpayer_type").default("legal"),
   taxRateCorporate: integer("tax_rate_corporate").default(25),
   vatRate: integer("vat_rate").default(10),
   currency: text("currency").default("تومان"),

@@ -1,6 +1,6 @@
 /**
  * Standalone Official Tax Declaration Print Engine for Hekmat Akma System
- * Generates an official, high-resolution Iranian Tax Declaration (برگ اظهارنامه مالیاتی رسمی)
+ * Generates an internal, high-resolution tax preparation report.
  * with self-contained styles, zero external script dependencies, and robust iframe printing.
  */
 
@@ -76,7 +76,7 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8" />
-  <title>برگ اظهارنامه مالیاتی رسمی - ${taxpayer.businessName}</title>
+  <title>گزارش آماده‌سازی اطلاعات مالیاتی - ${taxpayer.businessName}</title>
   <style>
     @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
 
@@ -261,13 +261,13 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
       <div class="header-center">
         <div style="font-size: 11px; font-weight: bold; color: #334155;">جمهوری اسلامی ایران</div>
         <div style="font-size: 14px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px;">سازمان امور مالیاتی کشور</div>
-        <div class="header-title-badge">برگ اظهارنامه مالیات بر عملکرد و ارزش افزوده</div>
+        <div class="header-title-badge">گزارش آماده‌سازی اطلاعات مالیاتی — غیررسمی</div>
       </div>
 
       <div class="header-col" style="text-align: left; line-height: 1.8;">
         <div>اداره کل امور مالیاتی:</div>
         <div style="font-weight: 800;">${taxpayer.taxOffice || "اداره کل امور مالیاتی"}</div>
-        <div style="font-family: monospace; font-size: 9.5px; color: #64748b;">فرم رسمی: INTA-110/PRO</div>
+        <div style="font-size: 9.5px; color: #64748b;">این خروجی جایگزین ثبت در درگاه سازمان امور مالیاتی نیست.</div>
       </div>
     </div>
 
@@ -313,7 +313,7 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
     <!-- Section 2: Gross Sales & Revenue -->
     <div class="section-card">
       <div class="section-header">
-        <span>بخش دوم: جدول محاسبه فروش ناخالص، تخفیفات و درآمد خالص ابرازی</span>
+        <span>بخش دوم: جدول محاسبه فروش ناخالص، تخفیفات و درآمد خالص ثبت‌شده</span>
         <span style="font-size: 10px; font-weight: normal;">مبالغ به تومان</span>
       </div>
       <table class="tax-table">
@@ -350,7 +350,7 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
     <!-- Section 3: Deductible Operating Expenses -->
     <div class="section-card">
       <div class="section-header">
-        <span>بخش سوم: جدول هزینه‌های عملیاتی و اداری قابل قبول مالیاتی (مواد ۱۴۷ و ۱۴۸ ق.م.م)</span>
+        <span>بخش سوم: هزینه‌های عملیاتی ثبت‌شده (پذیرش مالیاتی منوط به بررسی اسناد و مقررات)</span>
         <span style="font-size: 10px; font-weight: normal;">مبالغ به تومان</span>
       </div>
       <table class="tax-table">
@@ -363,7 +363,7 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
           </tr>
           <tr class="total-row">
             <td style="padding: 6px 10px; border: 1px solid #0f172a; text-align: center; font-weight: 900; background: #cbd5e1;">جمع</td>
-            <td style="padding: 6px 10px; border: 1px solid #0f172a;"><strong>جمع کل هزینه‌های عملیاتی قابل قبول دوره مالیاتی</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #0f172a;"><strong>جمع هزینه‌های عملیاتی ثبت‌شده (پذیرش منوط به بررسی)</strong></td>
             <td style="padding: 6px 10px; border: 1px solid #0f172a; text-align: left; font-family: monospace; font-weight: 900; font-size: 12px;">${formatMoney(statement.totalAllowableDeductions)}</td>
           </tr>
         </tbody>
@@ -390,7 +390,7 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
           </tr>
           <tr>
             <td style="padding: 8px 10px;">
-              مالیات و عوارض بر ارزش افزوده ابرازی فروش (VAT با نرخ مصوب: <strong>${statement.vatRate}%</strong>)
+              مالیات و عوارض ثبت‌شده روی فاکتورها (نرخ تنظیم‌شده: <strong>${statement.vatRate}%</strong>)
             </td>
             <td style="padding: 8px 10px; text-align: left; font-family: monospace; font-weight: 900; font-size: 12px; width: 170px;">${formatMoney(statement.calculatedVat)}</td>
           </tr>
@@ -401,14 +401,14 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
         </tbody>
       </table>
       <div style="padding: 8px 12px; background: #f8fafc; border-top: 1px solid #cbd5e1; font-size: 10.5px; color: #334155;">
-        مبلغ مالیات عملکرد ابرازی به حروف: <strong>${taxAmountWords}</strong>
+        مبلغ برآوردی مالیات عملکرد به حروف: <strong>${taxAmountWords}</strong>
       </div>
     </div>
 
     <!-- Section 5: Signature & Official Certification -->
     <div class="signatures-box">
       <p style="text-align: justify; font-size: 10.5px; line-height: 1.7; color: #334155; margin-bottom: 12px;">
-        اینجانب / صاحبان امضای مجاز شرکت با آگاهی کامل از مقررات و احکام قانونی مواد قانون مالیات‌های مستقیم و قانون مالیات بر ارزش افزوده، صحت و اصالت تمامی ارقام، فاکتورها، بهای تمام شده و اسناد مندرج در این اظهارنامه را برای دوره مالیاتی قید شده مورد تأیید و تصدیق قطعی قرار می‌دهیم.
+        این گزارش فقط برای کنترل و آماده‌سازی داخلی است. پیش از استفاده، ارقام باید با دفاتر، اسناد مثبته و سامانه مؤدیان تطبیق داده شوند و ارسال قانونی از درگاه رسمی انجام شود.
       </p>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; text-align: center;">
         <div>

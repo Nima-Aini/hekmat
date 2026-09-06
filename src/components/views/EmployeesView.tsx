@@ -66,7 +66,7 @@ export const EmployeesView: React.FC = () => {
   const [customers, setCustomers] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [commissions, setCommissions] = useState<any[]>([]);
-  const [commissionSummary, setCommissionSummary] = useState({ totalEarned: 0, totalPaid: 0, balancePending: 0 });
+  const [commissionSummary, setCommissionSummary] = useState({ totalEarned: 0, totalPayableByCollection: 0, totalPaid: 0, remainingPayable: 0, balancePending: 0 });
   const [financialAccounts, setFinancialAccounts] = useState<any[]>([]);
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [selectedCommissionIds, setSelectedCommissionIds] = useState<string[]>([]);
@@ -442,7 +442,7 @@ export const EmployeesView: React.FC = () => {
   const payableCommissions = commissions.filter((commission) => commission.eligibleForPayout);
   const selectedCommissionTotal = payableCommissions
     .filter((commission) => selectedCommissionIds.includes(commission.id))
-    .reduce((sum, commission) => sum + Number(commission.commissionAmount || 0), 0);
+    .reduce((sum, commission) => sum + Number(commission.remainingPayable || 0), 0);
   const toggleCommission = (id: string) => setSelectedCommissionIds((current) =>
     current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
   );
@@ -453,6 +453,7 @@ export const EmployeesView: React.FC = () => {
       products: "محصولات", projects: "پروژه‌ها", reports: "گزارش‌ها", financial: "مالی",
       expenses: "هزینه‌ها", purchases: "خرید", production: "تولید", employees: "همکاران",
       alerts: "اعلانات", raw_materials: "مواد اولیه", suppliers: "تأمین‌کنندگان",
+      orders: "سفارشات", notes: "یادداشت‌ها", audit: "لاگ فعالیت‌ها",
     };
     const group = labels[prefix] || "سایر دسترسی‌ها";
     (groups[group] ||= []).push(permission);
@@ -857,7 +858,7 @@ export const EmployeesView: React.FC = () => {
             {tab === "commission" && (
               <div className="space-y-4">
                 {/* Summary Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                   <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/30 p-4">
                     <div className="flex items-center justify-between text-xs text-emerald-400 font-semibold">
                       <span>کل پورسانت کسب‌شده</span>
@@ -880,13 +881,19 @@ export const EmployeesView: React.FC = () => {
                     <div className="text-[10px] text-slate-400 mt-0.5">ثبت شده در هزینه‌های سیستم</div>
                   </div>
 
+                  <div className="rounded-2xl border border-amber-500/20 bg-amber-950/30 p-4">
+                    <div className="text-xs text-amber-400 font-semibold">قابل پرداخت بر اساس وصول</div>
+                    <div className="text-lg font-black text-amber-300 font-mono mt-1">{formatMoney(commissionSummary.totalPayableByCollection)}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">متناسب با دریافت واقعی از مشتری</div>
+                  </div>
+
                   <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/30 p-4">
                     <div className="flex items-center justify-between text-xs text-cyan-400 font-semibold">
                       <span>مانده پورسانت قابل پرداخت</span>
                       <Wallet className="h-4 w-4" />
                     </div>
                     <div className="text-lg font-black text-cyan-300 font-mono mt-1">
-                      {formatMoney(commissionSummary.balancePending)}
+                      {formatMoney(commissionSummary.remainingPayable)}
                     </div>
                     <div className="text-[10px] text-slate-400 mt-0.5">طلب همکار از مجموعه</div>
                   </div>
@@ -976,7 +983,9 @@ export const EmployeesView: React.FC = () => {
                                   <span className="text-cyan-300">{c.invoiceNumber || "فاکتور"}</span>
                                   <div className="text-[10px] text-slate-500">{c.storeName || "—"} · {c.projectName || "عمومی"}</div>
                                   <div className="text-[10px] text-slate-500">{c.invoiceDate ? toJalaliDate(c.invoiceDate) : "—"} · فروش {formatMoney(c.invoiceTotal || c.baseAmount)}</div>
-                                  <div className="text-[10px] text-slate-500">مبنای پورسانت {formatMoney(c.baseAmount)} · نرخ {c.ruleSnapshot?.rateValue ?? c.ruleSnapshot?.rate ?? "—"}٪</div>
+                                  <div className="text-[10px] text-slate-500">پرداخت مشتری {formatMoney(c.invoicePaidAmount)} · مانده {formatMoney(c.invoiceBalanceDue)}</div>
+                                  <div className="text-[10px] text-slate-500">مبنا {formatMoney(c.baseAmount)} · نرخ {Number(c.commissionRate || 0).toLocaleString("fa-IR", { maximumFractionDigits: 2 })}٪</div>
+                                  <div className="text-[10px] text-amber-300">قابل وصول {formatMoney(c.payableByCollection)} · پرداخت‌شده {formatMoney(c.alreadyPaidCommission)} · قابل پرداخت {formatMoney(c.remainingPayable)}</div>
                                 </div>
                               ) : c.baseAmount ? (
                                 formatMoney(c.baseAmount)
@@ -1924,7 +1933,7 @@ export const EmployeesView: React.FC = () => {
                   <p className="text-[11px] text-slate-400">
                     مانده قابل پرداخت:{" "}
                     <span className="font-bold text-emerald-400 font-mono">
-                      {formatMoney(commissionSummary.balancePending)}
+                      {formatMoney(commissionSummary.remainingPayable)}
                     </span>
                   </p>
                 </div>

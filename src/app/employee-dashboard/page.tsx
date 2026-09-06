@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { toJalaliDate, formatMoney, formatNumber } from "@/lib/dateUtils";
 import { NeshanMapPicker } from "@/components/maps/NeshanMapPicker";
+import { OrdersView } from "@/components/views/OrdersView";
+import { NotesView } from "@/components/views/NotesView";
 
 export default function EmployeeDashboardPage() {
   const router = useRouter();
@@ -564,6 +566,9 @@ export default function EmployeeDashboardPage() {
             کاتالوگ محصولات ({products.length})
           </button>}
 
+          {can("orders.view") && <button onClick={() => setTab("orders")} className={`rounded-xl px-4 py-2 text-xs font-bold transition ${tab === "orders" ? "bg-purple-500 text-white" : "border border-slate-800 bg-slate-900/70 text-slate-300 hover:text-white"}`}>سفارشات</button>}
+          {can("notes.view") && <button onClick={() => setTab("notes")} className={`rounded-xl px-4 py-2 text-xs font-bold transition ${tab === "notes" ? "bg-purple-500 text-white" : "border border-slate-800 bg-slate-900/70 text-slate-300 hover:text-white"}`}>یادداشت‌ها</button>}
+
           <div className="mt-auto flex flex-col gap-2 border-t border-slate-800 pt-3">
             {can("customers.create") && <button
               onClick={() => openCustomerModal()}
@@ -590,6 +595,9 @@ export default function EmployeeDashboardPage() {
             )}
           </div>
         </nav>
+
+        {tab === "orders" && can("orders.view") && <OrdersView permissions={permissions} />}
+        {tab === "notes" && can("notes.view") && <NotesView permissions={permissions} />}
 
         {/* TAB 1: OVERVIEW */}
         {tab === "overview" && (

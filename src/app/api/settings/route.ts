@@ -26,6 +26,7 @@ export async function GET(req: Request) {
           companyAddress: "",
           companyPhone: "",
           taxOffice: "",
+          taxpayerType: "legal",
           taxRateCorporate: 25,
           vatRate: 10,
           currency: "تومان",
@@ -58,6 +59,9 @@ export async function PUT(req: Request) {
         return NextResponse.json({ success: false, error: "نرخ مالیات ارزش افزوده نامعتبر است." }, { status: 400 });
       }
     }
+    if (body.taxpayerType !== undefined && !["legal", "individual"].includes(body.taxpayerType)) {
+      return NextResponse.json({ success: false, error: "نوع مؤدی نامعتبر است." }, { status: 400 });
+    }
 
     const updateData: Record<string, any> = {
       id: "main_config",
@@ -70,6 +74,7 @@ export async function PUT(req: Request) {
       companyAddress: body.companyAddress,
       companyPhone: body.companyPhone,
       taxOffice: body.taxOffice,
+      taxpayerType: body.taxpayerType || "legal",
       taxRateCorporate: body.taxRateCorporate !== undefined ? Number(body.taxRateCorporate) : 25,
       vatRate: body.vatRate !== undefined ? Number(body.vatRate) : 10,
       currency: body.currency || "تومان",

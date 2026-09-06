@@ -13,10 +13,11 @@ import {
   productionBatches,
   inventoryLedger,
   commissionLedger,
+  commissionPaymentAllocations,
   accounts,
   systemSettings
 } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, countDistinct, eq, desc, gt, gte, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 
 export interface ReportFilter {
   startDate?: Date | null;
@@ -35,30 +36,23 @@ export interface ReportFilter {
  * 1. Dashboard Executive KPIs & Overview
  */
 export async function getDashboardKPIs(filter: ReportFilter = {}) {
-  const allInvoices = await db.select().from(invoices);
-  const allExpenses = await db.select().from(expenses);
-  const allCustomers = await db.select().from(customers);
-  const allProducts = await db.select().from(products);
-  const allRawMaterials = await db.select().from(rawMaterials);
-  const allAccounts = await db.select().from(accounts);
-
-  // Apply project filter in memory for consistency across all entities
-  const scopedInvoices = allInvoices.filter((inv) => {
-    if (inv.status === "reversed") return false;
-    if (filter.projectId && inv.projectId !== filter.projectId) return false;
-    if (filter.excludeProjectIds?.includes(inv.projectId || "")) return false;
-    if (filter.startDate && new Date(inv.invoiceDate) < filter.startDate) return false;
-    if (filter.endDate && new Date(inv.invoiceDate) > filter.endDate) return false;
-    return true;
-  });
-
-  const scopedExpenses = allExpenses.filter((exp) => {
-    if (filter.projectId && exp.projectId !== filter.projectId) return false;
-    if (filter.excludeProjectIds?.includes(exp.projectId || "")) return false;
-    if (filter.startDate && new Date(exp.expenseDate) < filter.startDate) return false;
-    if (filter.endDate && new Date(exp.expenseDate) > filter.endDate) return false;
-    return true;
-  });
+  const invoiceConditions = [eq(invoices.status, "issued")];
+  const expenseConditions = [];
+  const paymentConditions = [eq(payments.status, "completed"), eq(payments.paymentType, "customer_receipt")];
+  if (filter.projectId) { invoiceConditions.push(eq(invoices.projectId, filter.projectId)); expenseConditions.push(eq(expenses.projectId, filter.projectId)); paymentConditions.push(eq(payments.projectId, filter.projectId)); }
+  if (filter.excludeProjectIds?.length) {
+    invoiceConditions.push(or(isNull(invoices.projectId), notInArray(invoices.projectId, filter.excludeProjectIds))!);
+    expenseConditions.push(or(isNull(expenses.projectId), notInArray(expenses.projectId, filter.excludeProjectIds))!);
+    paymentConditions.push(or(isNull(payments.projectId), notInArray(payments.projectId, filter.excludeProjectIds))!);
+  }
+  if (filter.startDate) { invoiceConditions.push(gte(invoices.invoiceDate, filter.startDate)); expenseConditions.push(gte(expenses.expenseDate, filter.startDate)); paymentConditions.push(gte(payments.paymentDate, filter.startDate)); }
+  if (filter.endDate) { invoiceConditions.push(lte(invoices.invoiceDate, filter.endDate)); expenseConditions.push(lte(expenses.expenseDate, filter.endDate)); paymentConditions.push(lte(payments.paymentDate, filter.endDate)); }
+  const [scopedInvoices, scopedExpenses, scopedPayments, allCustomers, allProducts, allRawMaterials, allAccounts] = await Promise.all([
+    db.select().from(invoices).where(and(...invoiceConditions)),
+    db.select().from(expenses).where(and(...expenseConditions)),
+    db.select().from(payments).where(and(...paymentConditions)),
+    db.select().from(customers), db.select().from(products), db.select().from(rawMaterials), db.select().from(accounts).where(eq(accounts.status, "active")),
+  ]);
 
   let totalSales = 0;
   let totalCogs = 0;
@@ -70,9 +64,9 @@ export async function getDashboardKPIs(filter: ReportFilter = {}) {
     totalSales += Number(inv.grandTotal) || 0;
     totalCogs += Number(inv.cogsTotal) || 0;
     totalGrossProfit += Number(inv.grossProfitTotal) || 0; // Unclamped real gross profit
-    totalPaid += Number(inv.paidAmount) || 0;
     totalReceivable += Number(inv.balanceDue) || 0;
   }
+  totalPaid = scopedPayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
 
   let totalOperatingExpenses = 0;
   for (const exp of scopedExpenses) {
@@ -104,6 +98,23 @@ export async function getDashboardKPIs(filter: ReportFilter = {}) {
   const greenCustomers = allCustomers.filter((c) => c.healthStatus === "green").length;
   const yellowCustomers = allCustomers.filter((c) => c.healthStatus === "yellow").length;
   const redCustomers = allCustomers.filter((c) => c.healthStatus === "red").length;
+  const now = new Date();
+  const overdueReceivable = scopedInvoices.filter((invoice) => invoice.dueDate && invoice.dueDate < now).reduce((sum, invoice) => sum + Number(invoice.balanceDue || 0), 0);
+  const notDueReceivable = Math.max(0, totalReceivable - overdueReceivable);
+  const lowRawMaterials = allRawMaterials.filter((item) => item.status === "active" && Number(item.stockQuantity) <= Number(item.minStockQuantity));
+  const criticalRawMaterials = lowRawMaterials.filter((item) => Number(item.stockQuantity) <= 0);
+  const topShortages = lowRawMaterials.map((item) => ({ id: item.id, name: item.name, stock: Number(item.stockQuantity), minimum: Number(item.minStockQuantity), shortage: Math.max(0, Number(item.minStockQuantity) - Number(item.stockQuantity)) })).sort((a, b) => b.shortage - a.shortage).slice(0, 5);
+  let salesChangePercent: number | null = null;
+  if (filter.startDate && filter.endDate) {
+    const duration = filter.endDate.getTime() - filter.startDate.getTime() + 1;
+    const previousEnd = new Date(filter.startDate.getTime() - 1);
+    const previousStart = new Date(previousEnd.getTime() - duration + 1);
+    const previousConditions = [eq(invoices.status, "issued"), gte(invoices.invoiceDate, previousStart), lte(invoices.invoiceDate, previousEnd)];
+    if (filter.projectId) previousConditions.push(eq(invoices.projectId, filter.projectId));
+    const previousInvoices = await db.select({ grandTotal: invoices.grandTotal }).from(invoices).where(and(...previousConditions));
+    const previousSales = previousInvoices.reduce((sum, invoice) => sum + Number(invoice.grandTotal || 0), 0);
+    salesChangePercent = previousSales > 0 ? Math.round(((totalSales - previousSales) / previousSales) * 1000) / 10 : totalSales > 0 ? 100 : 0;
+  }
 
   return {
     totalSales,
@@ -118,6 +129,16 @@ export async function getDashboardKPIs(filter: ReportFilter = {}) {
     totalLiquidity,
     totalInventoryValue,
     invoiceCount: scopedInvoices.length,
+    averageInvoiceValue: scopedInvoices.length ? totalSales / scopedInvoices.length : 0,
+    salesChangePercent,
+    overdueReceivable,
+    notDueReceivable,
+    collectedInPeriod: totalPaid,
+    collectionRate: totalSales > 0 ? Math.round((totalPaid / totalSales) * 1000) / 10 : 0,
+    lowRawMaterialCount: lowRawMaterials.length,
+    criticalRawMaterialCount: criticalRawMaterials.length,
+    rawMaterialInventoryValue: allRawMaterials.reduce((sum, item) => sum + Number(item.stockQuantity || 0) * Number(item.averageCost || item.currentCost || 0), 0),
+    topShortages,
     customerCount: allCustomers.length,
     healthBreakdown: { green: greenCustomers, yellow: yellowCustomers, red: redCustomers },
   };
@@ -127,6 +148,15 @@ export async function getDashboardKPIs(filter: ReportFilter = {}) {
  * 2. Sales Report Engine with Time-series, Product/Customer Breakdown & Drill-downs
  */
 export async function getSalesReport(filter: ReportFilter = {}) {
+  const invoiceConditions = [eq(invoices.status, "issued")];
+  if (filter.projectId) invoiceConditions.push(eq(invoices.projectId, filter.projectId));
+  if (filter.excludeProjectIds?.length) invoiceConditions.push(or(isNull(invoices.projectId), notInArray(invoices.projectId, filter.excludeProjectIds))!);
+  if (filter.customerId) invoiceConditions.push(eq(invoices.customerId, filter.customerId));
+  if (filter.employeeId) invoiceConditions.push(eq(invoices.employeeId, filter.employeeId));
+  if (filter.salesMode) invoiceConditions.push(eq(invoices.salesMode, filter.salesMode));
+  if (filter.paymentStatus) invoiceConditions.push(eq(invoices.paymentStatus, filter.paymentStatus));
+  if (filter.startDate) invoiceConditions.push(gte(invoices.invoiceDate, filter.startDate));
+  if (filter.endDate) invoiceConditions.push(lte(invoices.invoiceDate, filter.endDate));
   const invoiceList = await db
     .select({
       invoice: invoices,
@@ -134,28 +164,18 @@ export async function getSalesReport(filter: ReportFilter = {}) {
       customerStore: customers.storeName,
       projectName: projects.name,
       employeeName: employees.name,
+      employeeRole: employees.role,
     })
     .from(invoices)
     .innerJoin(customers, eq(invoices.customerId, customers.id))
     .leftJoin(projects, eq(invoices.projectId, projects.id))
     .leftJoin(employees, eq(invoices.employeeId, employees.id))
+    .where(and(...invoiceConditions))
     .orderBy(desc(invoices.invoiceDate));
-
-  const filtered = invoiceList.filter(({ invoice }) => {
-    if (invoice.status === "reversed") return false;
-    if (filter.projectId && invoice.projectId !== filter.projectId) return false;
-    if (filter.excludeProjectIds?.includes(invoice.projectId || "")) return false;
-    if (filter.customerId && invoice.customerId !== filter.customerId) return false;
-    if (filter.employeeId && invoice.employeeId !== filter.employeeId) return false;
-    if (filter.salesMode && invoice.salesMode !== filter.salesMode) return false;
-    if (filter.paymentStatus && invoice.paymentStatus !== filter.paymentStatus) return false;
-    if (filter.startDate && new Date(invoice.invoiceDate) < filter.startDate) return false;
-    if (filter.endDate && new Date(invoice.invoiceDate) > filter.endDate) return false;
-    return true;
-  });
+  const filtered = invoiceList;
 
   // Time-series aggregation (by Date YYYY-MM-DD)
-  const timeSeriesMap = new Map<string, { date: string; sales: number; profit: number; count: number }>();
+  const timeSeriesMap = new Map<string, { date: string; sales: number; profit: number; collected: number; receivable: number; count: number }>();
 
   let grossSales = 0;
   let totalDiscounts = 0;
@@ -180,14 +200,32 @@ export async function getSalesReport(filter: ReportFilter = {}) {
     totalProfit += profit;
 
     const dateStr = new Date(invoice.invoiceDate).toISOString().slice(0, 10);
-    const existingSeries = timeSeriesMap.get(dateStr) || { date: dateStr, sales: 0, profit: 0, count: 0 };
+    const existingSeries = timeSeriesMap.get(dateStr) || { date: dateStr, sales: 0, profit: 0, collected: 0, receivable: 0, count: 0 };
     existingSeries.sales += gTotal;
     existingSeries.profit += profit;
+    existingSeries.collected += paid;
+    existingSeries.receivable += rec;
     existingSeries.count += 1;
     timeSeriesMap.set(dateStr, existingSeries);
   }
 
   const chartData = Array.from(timeSeriesMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const commissionRows = filtered.length ? await db.select({ invoiceId: commissionLedger.invoiceId, amount: commissionLedger.commissionAmount })
+    .from(commissionLedger).where(and(inArray(commissionLedger.invoiceId, filtered.map((row) => row.invoice.id)), ne(commissionLedger.status, "reversed"))) : [];
+  const commissionByInvoice = new Map<string, number>();
+  for (const row of commissionRows) if (row.invoiceId) commissionByInvoice.set(row.invoiceId, (commissionByInvoice.get(row.invoiceId) || 0) + Math.max(0, Number(row.amount) || 0));
+  const employeeMap = new Map<string, { employeeId: string | null; employeeName: string; role: string; invoiceCount: number; totalSales: number; totalCommission: number; collected: number; outstanding: number }>();
+  for (const row of filtered) {
+    const key = row.invoice.employeeId || "direct";
+    const current = employeeMap.get(key) || { employeeId: row.invoice.employeeId, employeeName: row.employeeName || "فروش مستقیم", role: row.employeeRole || "ویزیتور", invoiceCount: 0, totalSales: 0, totalCommission: 0, collected: 0, outstanding: 0 };
+    current.invoiceCount += 1;
+    current.totalSales += Number(row.invoice.grandTotal) || 0;
+    current.collected += Number(row.invoice.paidAmount) || 0;
+    current.outstanding += Number(row.invoice.balanceDue) || 0;
+    current.totalCommission += commissionByInvoice.get(row.invoice.id) || 0;
+    employeeMap.set(key, current);
+  }
+  const employeePerformances = Array.from(employeeMap.values()).sort((a, b) => b.totalSales - a.totalSales);
 
   return {
     kpis: {
@@ -201,6 +239,8 @@ export async function getSalesReport(filter: ReportFilter = {}) {
       averageInvoiceValue: filtered.length > 0 ? Math.round(netSales / filtered.length) : 0,
     },
     chartData,
+    employeePerformances,
+    visitorSalesTotal: employeePerformances.filter((row) => row.employeeId).reduce((sum, row) => sum + row.totalSales, 0),
     invoices: filtered.map(({ invoice, customerName, customerStore, projectName, employeeName }) => ({
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
@@ -227,7 +267,7 @@ export async function getFinancialProfitReport(filter: ReportFilter = {}) {
   const allCommissions = await db.select().from(commissionLedger);
 
   const scopedInvoices = allInvoices.filter((inv) => {
-    if (inv.status === "reversed") return false;
+    if (inv.status !== "issued") return false;
     if (filter.projectId && inv.projectId !== filter.projectId) return false;
     if (filter.excludeProjectIds?.includes(inv.projectId || "")) return false;
     if (filter.startDate && new Date(inv.invoiceDate) < filter.startDate) return false;
@@ -264,12 +304,14 @@ export async function getFinancialProfitReport(filter: ReportFilter = {}) {
 
   let operatingExpenses = 0;
   for (const exp of scopedExpenses) {
-    operatingExpenses += Number(exp.amount) || 0;
+    // Commission payout expenses are cash-settlement documents for amounts
+    // already accrued in commission_ledger; counting both would duplicate cost.
+    if (exp.category !== "commission") operatingExpenses += Number(exp.amount) || 0;
   }
 
   let totalCommissions = 0;
   for (const c of scopedCommissions) {
-    if (c.status !== "reversed") {
+    if (c.status !== "reversed" && c.commissionType !== "payout" && Number(c.commissionAmount) > 0) {
       totalCommissions += Number(c.commissionAmount) || 0;
     }
   }
@@ -322,7 +364,7 @@ export async function getCashFlowReport(filter: ReportFilter = {}) {
   let aging90plus = 0;
 
   for (const inv of allInvoices) {
-    if (inv.status === "reversed") continue;
+    if (inv.status !== "issued") continue;
     const balance = Number(inv.balanceDue) || 0;
     if (balance <= 0) continue;
 
@@ -454,7 +496,7 @@ export async function getProjectComparisonReport(projectAId: string, projectBId:
 }
 
 /**
- * 7. Official Tax Declaration Report (گزارش اظهارنامه مالیاتی رسمی)
+ * 7. Internal tax-preparation report. This is not an official declaration.
  */
 export async function getTaxDeclarationReport(filter: ReportFilter = {}) {
   const [settings] = await db.select().from(systemSettings).where(eq(systemSettings.id, "main_config")).limit(1);
@@ -464,7 +506,7 @@ export async function getTaxDeclarationReport(filter: ReportFilter = {}) {
   const allCommissions = await db.select().from(commissionLedger);
 
   const scopedInvoices = allInvoices.filter((inv) => {
-    if (inv.status === "reversed") return false;
+    if (inv.status !== "issued") return false;
     if (filter.projectId && inv.projectId !== filter.projectId) return false;
     if (filter.excludeProjectIds?.includes(inv.projectId || "")) return false;
     if (filter.startDate && new Date(inv.invoiceDate) < filter.startDate) return false;
@@ -518,17 +560,20 @@ export async function getTaxDeclarationReport(filter: ReportFilter = {}) {
 
   let totalCommissions = 0;
   for (const c of scopedCommissions) {
-    totalCommissions += Number(c.commissionAmount) || 0;
+    if (c.status !== "reversed" && c.commissionType !== "payout" && Number(c.commissionAmount) > 0) totalCommissions += Number(c.commissionAmount) || 0;
   }
 
-  const totalAllowableDeductions = totalExpenses + totalCommissions;
-  const taxableOperatingProfit = grossProfit - totalAllowableDeductions;
+  // Expense eligibility is a legal/documentary determination. Do not label all
+  // application expenses as tax-allowable or add commission a second time.
+  const totalAllowableDeductions = totalExpenses;
+  const taxableOperatingProfit = grossProfit - totalExpenses;
 
   const corporateTaxRate = Number(settings?.taxRateCorporate) || 25;
   const vatRate = Number(settings?.vatRate) || 10;
 
   const corporateTaxAmount = taxableOperatingProfit > 0 ? Math.round((taxableOperatingProfit * corporateTaxRate) / 100) : 0;
-  const calculatedVat = Math.round((netSalesRevenue * vatRate) / 100);
+  const calculatedVat = vatCollected;
+  const estimatedVatAtConfiguredRate = Math.round((netSalesRevenue * vatRate) / 100);
   const netRetainedProfit = taxableOperatingProfit - corporateTaxAmount;
 
   return {
@@ -543,6 +588,7 @@ export async function getTaxDeclarationReport(filter: ReportFilter = {}) {
       taxOffice: settings?.taxOffice || "اداره امور مالیاتی",
       corporateTaxRate,
       vatRate,
+      taxpayerType: settings?.taxpayerType || "legal",
     },
     period: {
       startDate: filter.startDate ? filter.startDate.toISOString() : null,
@@ -563,6 +609,8 @@ export async function getTaxDeclarationReport(filter: ReportFilter = {}) {
       corporateTaxAmount,
       corporateTaxRate,
       calculatedVat,
+      vatCollected,
+      estimatedVatAtConfiguredRate,
       vatRate,
       netRetainedProfit,
       totalPaid,
@@ -578,4 +626,70 @@ export async function getTaxDeclarationReport(filter: ReportFilter = {}) {
       paymentStatus: inv.paymentStatus,
     })),
   };
+}
+
+function validInvoiceConditions(filter: ReportFilter) {
+  const conditions = [eq(invoices.status, "issued")];
+  if (filter.projectId) conditions.push(eq(invoices.projectId, filter.projectId));
+  if (filter.startDate) conditions.push(gte(invoices.invoiceDate, filter.startDate));
+  if (filter.endDate) conditions.push(lte(invoices.invoiceDate, filter.endDate));
+  return conditions;
+}
+
+export async function getExpenseCenterReport(filter: ReportFilter = {}) {
+  const conditions = [];
+  if (filter.projectId) conditions.push(eq(expenses.projectId, filter.projectId));
+  if (filter.startDate) conditions.push(gte(expenses.expenseDate, filter.startDate));
+  if (filter.endDate) conditions.push(lte(expenses.expenseDate, filter.endDate));
+  const rows = await db.select({ category: expenses.category, total: sql<number>`COALESCE(SUM(${expenses.amount}),0)`, count: sql<number>`COUNT(*)`, largest: sql<number>`COALESCE(MAX(${expenses.amount}),0)` }).from(expenses).where(and(...conditions)).groupBy(expenses.category).orderBy(desc(sql`SUM(${expenses.amount})`));
+  return { totalExpense: rows.reduce((sum, row) => sum + Number(row.total), 0), categories: rows.map((row) => ({ ...row, total: Number(row.total), count: Number(row.count), largest: Number(row.largest) })) };
+}
+
+export async function getProductCenterReport(filter: ReportFilter = {}) {
+  const conditions = validInvoiceConditions(filter);
+  if (filter.productId) conditions.push(eq(invoiceItems.productId, filter.productId));
+  const rows = await db.select({ productId: invoiceItems.productId, productName: invoiceItems.productNameSnapshot, quantitySold: sql<number>`SUM(${invoiceItems.quantity})`, revenue: sql<number>`SUM(${invoiceItems.lineTotal})`, cogs: sql<number>`SUM(${invoiceItems.lineCogs})`, grossProfit: sql<number>`SUM(${invoiceItems.lineProfit})`, averagePrice: sql<number>`AVG(${invoiceItems.unitPrice})`, invoiceCount: countDistinct(invoiceItems.invoiceId), customerCount: countDistinct(invoices.customerId) }).from(invoiceItems).innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id)).where(and(...conditions)).groupBy(invoiceItems.productId, invoiceItems.productNameSnapshot).orderBy(desc(sql`SUM(${invoiceItems.lineTotal})`));
+  return rows.map((row) => { const revenue = Number(row.revenue); const profit = Number(row.grossProfit); return { ...row, quantitySold: Number(row.quantitySold), revenue, cogs: Number(row.cogs), grossProfit: profit, averagePrice: Number(row.averagePrice), invoiceCount: Number(row.invoiceCount), customerCount: Number(row.customerCount), margin: revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : 0 }; });
+}
+
+export async function getCustomerCenterReport(filter: ReportFilter = {}, customerIds: string[] = []) {
+  const conditions = validInvoiceConditions(filter);
+  if (customerIds.length) conditions.push(inArray(invoices.customerId, customerIds));
+  const rows = await db.select({ customerId: customers.id, customerName: customers.name, storeName: customers.storeName, totalSales: sql<number>`SUM(${invoices.grandTotal})`, invoiceCount: sql<number>`COUNT(*)`, collected: sql<number>`SUM(${invoices.paidAmount})`, outstanding: sql<number>`SUM(${invoices.balanceDue})`, overdue: sql<number>`SUM(CASE WHEN ${invoices.balanceDue} > 0 AND ${invoices.dueDate} < NOW() THEN ${invoices.balanceDue} ELSE 0 END)`, grossProfit: sql<number>`SUM(${invoices.grossProfitTotal})`, lastPurchase: sql<Date>`MAX(${invoices.invoiceDate})` }).from(invoices).innerJoin(customers, eq(invoices.customerId, customers.id)).where(and(...conditions)).groupBy(customers.id, customers.name, customers.storeName).orderBy(desc(sql`SUM(${invoices.grandTotal})`));
+  return rows.map((row) => ({ ...row, totalSales: Number(row.totalSales), invoiceCount: Number(row.invoiceCount), collected: Number(row.collected), outstanding: Number(row.outstanding), overdue: Number(row.overdue), grossProfit: Number(row.grossProfit), averageInvoice: Number(row.invoiceCount) ? Number(row.totalSales) / Number(row.invoiceCount) : 0 }));
+}
+
+export async function getProjectCenterReport(filter: ReportFilter = {}) {
+  const conditions = validInvoiceConditions(filter);
+  const rows = await db.select({ projectId: projects.id, projectName: projects.name, sales: sql<number>`SUM(${invoices.grandTotal})`, profit: sql<number>`SUM(${invoices.grossProfitTotal})`, collected: sql<number>`SUM(${invoices.paidAmount})`, receivables: sql<number>`SUM(${invoices.balanceDue})`, invoiceCount: sql<number>`COUNT(*)` }).from(invoices).leftJoin(projects, eq(invoices.projectId, projects.id)).where(and(...conditions)).groupBy(projects.id, projects.name).orderBy(desc(sql`SUM(${invoices.grandTotal})`));
+  return rows.map((row) => ({ ...row, projectName: row.projectName || "عمومی", sales: Number(row.sales), profit: Number(row.profit), collected: Number(row.collected), receivables: Number(row.receivables), invoiceCount: Number(row.invoiceCount) }));
+}
+
+export async function getCommissionCenterReport(filter: ReportFilter = {}) {
+  const conditions = [ne(commissionLedger.status, "reversed"), gt(commissionLedger.commissionAmount, "0")];
+  if (filter.projectId) conditions.push(eq(commissionLedger.projectId, filter.projectId));
+  if (filter.startDate) conditions.push(gte(commissionLedger.createdAt, filter.startDate));
+  if (filter.endDate) conditions.push(lte(commissionLedger.createdAt, filter.endDate));
+  const rows = await db.select({ commission: commissionLedger, employeeName: employees.name, invoiceTotal: invoices.grandTotal, invoicePaid: invoices.paidAmount, invoiceStatus: invoices.status }).from(commissionLedger).innerJoin(employees, eq(commissionLedger.employeeId, employees.id)).leftJoin(invoices, eq(commissionLedger.invoiceId, invoices.id)).where(and(...conditions));
+  const ids = rows.map((row) => row.commission.id);
+  const allocations = ids.length ? await db.select().from(commissionPaymentAllocations).where(inArray(commissionPaymentAllocations.commissionLedgerId, ids)) : [];
+  const paidById = new Map<string, number>();
+  for (const allocation of allocations) paidById.set(allocation.commissionLedgerId, (paidById.get(allocation.commissionLedgerId) || 0) + Number(allocation.amount));
+  const byEmployee = new Map<string, { employeeId: string; employeeName: string; earned: number; payable: number; paid: number; unpaid: number }>();
+  for (const row of rows) {
+    const amount = Number(row.commission.commissionAmount);
+    const ratio = row.invoiceStatus === "issued" && Number(row.invoiceTotal) > 0 ? Math.min(1, Math.max(0, Number(row.invoicePaid) / Number(row.invoiceTotal))) : 0;
+    const payable = Math.round(amount * ratio * 100) / 100;
+    const allocated = paidById.get(row.commission.id) || (row.commission.paymentId || row.commission.status === "paid" ? amount : 0);
+    const current = byEmployee.get(row.commission.employeeId) || { employeeId: row.commission.employeeId, employeeName: row.employeeName, earned: 0, payable: 0, paid: 0, unpaid: 0 };
+    current.earned += amount; current.payable += payable; current.paid += allocated; current.unpaid += Math.max(0, payable - allocated); byEmployee.set(current.employeeId, current);
+  }
+  return Array.from(byEmployee.values()).sort((a, b) => b.earned - a.earned);
+}
+
+export async function getPeriodComparisonReport(first: ReportFilter, second: ReportFilter) {
+  const [periodA, periodB] = await Promise.all([getDashboardKPIs(first), getDashboardKPIs(second)]);
+  const keys = ["totalSales", "collectedInPeriod", "totalGrossProfit", "netProfit", "totalOperatingExpenses", "invoiceCount", "averageInvoiceValue"] as const;
+  const changes = Object.fromEntries(keys.map((key) => { const a = Number(periodA[key] || 0); const b = Number(periodB[key] || 0); return [key, b ? Math.round(((a - b) / Math.abs(b)) * 1000) / 10 : a ? 100 : 0]; }));
+  return { periodA, periodB, changes };
 }

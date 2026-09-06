@@ -1,5 +1,6 @@
 import { ApiError } from "@/lib/apiError";
 import { apiError } from "@/lib/apiError";
+import { parseReportDateParam } from "@/lib/dateUtils";
 import { NextResponse } from "next/server";
 import {
   getDashboardKPIs,
@@ -8,7 +9,13 @@ import {
   getCashFlowReport,
   getInventoryAndRawMaterialReport,
   getProjectComparisonReport,
-  getTaxDeclarationReport
+  getTaxDeclarationReport,
+  getExpenseCenterReport,
+  getProductCenterReport,
+  getCustomerCenterReport,
+  getProjectCenterReport,
+  getCommissionCenterReport,
+  getPeriodComparisonReport,
 } from "@/services/reporting";
 import { simulateInflationImpact } from "@/services/pricing";
 import { requirePermission } from "@/services/access";
@@ -27,29 +34,20 @@ export async function GET(req: Request) {
     const endDateStr = searchParams.get("endDate");
     const customerId = searchParams.get("customerId");
     const employeeId = searchParams.get("employeeId");
+    const productId = searchParams.get("productId");
 
-    let parsedStartDate: Date | null = null;
-    let parsedEndDate: Date | null = null;
-
-    if (startDateStr) {
-      parsedStartDate = new Date(startDateStr);
-      if (startDateStr.length <= 10 && !isNaN(parsedStartDate.getTime())) {
-        parsedStartDate.setHours(0, 0, 0, 0);
-      }
-    }
-
-    if (endDateStr) {
-      parsedEndDate = new Date(endDateStr);
-      if (endDateStr.length <= 10 && !isNaN(parsedEndDate.getTime())) {
-        parsedEndDate.setHours(23, 59, 59, 999);
-      }
-    }
+    const parsedStartDate = parseReportDateParam(startDateStr, false);
+    const parsedEndDate = parseReportDateParam(endDateStr, true);
+    if (startDateStr && !parsedStartDate) return NextResponse.json({ success: false, error: "تاریخ شروع نامعتبر است." }, { status: 400 });
+    if (endDateStr && !parsedEndDate) return NextResponse.json({ success: false, error: "تاریخ پایان نامعتبر است." }, { status: 400 });
+    if (parsedStartDate && parsedEndDate && parsedStartDate > parsedEndDate) return NextResponse.json({ success: false, error: "تاریخ شروع نباید بعد از تاریخ پایان باشد." }, { status: 400 });
 
     const filter = {
       projectId: projectId || null,
       startDate: parsedStartDate,
       endDate: parsedEndDate,
       customerId: customerId || null,
+      productId: productId || null,
       employeeId: globalReports ? employeeId || null : context.employeeId,
     };
 
@@ -80,6 +78,39 @@ export async function GET(req: Request) {
 
     if (type === "inventory") {
       const data = await getInventoryAndRawMaterialReport(filter);
+      return NextResponse.json({ success: true, data });
+    }
+
+    if (type === "expenses_center") {
+      return NextResponse.json({ success: true, data: await getExpenseCenterReport(filter) });
+    }
+
+    if (type === "products_center") {
+      return NextResponse.json({ success: true, data: await getProductCenterReport(filter) });
+    }
+
+    if (type === "customers_center") {
+      const customerIds = searchParams.getAll("customerId").filter(Boolean);
+      return NextResponse.json({ success: true, data: await getCustomerCenterReport(filter, customerIds) });
+    }
+
+    if (type === "projects_center") {
+      return NextResponse.json({ success: true, data: await getProjectCenterReport(filter) });
+    }
+
+    if (type === "commissions_center") {
+      return NextResponse.json({ success: true, data: await getCommissionCenterReport(filter) });
+    }
+
+    if (type === "period_comparison") {
+      const compareStartRaw = searchParams.get("compareStartDate");
+      const compareEndRaw = searchParams.get("compareEndDate");
+      const compareStart = parseReportDateParam(compareStartRaw, false);
+      const compareEnd = parseReportDateParam(compareEndRaw, true);
+      if (!compareStartRaw || !compareEndRaw || !compareStart || !compareEnd || compareStart > compareEnd) {
+        return NextResponse.json({ success: false, error: "بازه مقایسه نامعتبر است." }, { status: 400 });
+      }
+      const data = await getPeriodComparisonReport(filter, { ...filter, startDate: compareStart, endDate: compareEnd });
       return NextResponse.json({ success: true, data });
     }
 
