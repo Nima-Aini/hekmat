@@ -88,14 +88,14 @@ export async function generateInvoiceNumber(client: Transaction | typeof db = db
  * Transactional Invoice Creation.
  * Atomic: Runs Invoice, Items, Inventory Ledger, Payment, Commission, and Audit in one transactional flow!
  */
-export async function createInvoice(input: CreateInvoiceInput) {
+export async function createInvoice(input: CreateInvoiceInput, client?: Transaction) {
   if (!Array.isArray(input.items) || !input.items.length) throw new ApiError(400, "حداقل یک قلم فاکتور الزامی است.");
   decimal(input.invoiceDiscount ?? 0, "تخفیف");
   decimal(input.taxTotal ?? 0, "مالیات");
   if (input.initialPayment) decimal(input.initialPayment.amount, "پرداخت");
   const customerId = input.customerId;
 
-  return await db.transaction(async (tx) => {
+  const operation = async (tx: Transaction) => {
     if (input.requestKey) {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.requestKey}, 0))`);
       const [prior] = await tx.select().from(invoices).where(eq(invoices.requestKey, input.requestKey)).limit(1);
@@ -340,6 +340,16 @@ export async function createInvoice(input: CreateInvoiceInput) {
     // Handle Initial Payment if provided
     if (input.initialPayment && Number(input.initialPayment.amount) > grandTotal) throw new ApiError(400, "پرداخت از مبلغ فاکتور بیشتر است.");
     const initialPayAmount = input.initialPayment ? Number(input.initialPayment.amount) : 0;
+    if (initialPayAmount > 0) {
+      assertUuid(input.initialPayment!.accountId);
+      const [receiptAccount] = await tx.select({ id: accounts.id, status: accounts.status }).from(accounts)
+        .where(eq(accounts.id, input.initialPayment!.accountId)).for("update").limit(1);
+      if (!receiptAccount || receiptAccount.status !== "active") {
+        throw new ApiError(404, "حساب دریافت انتخاب‌شده یافت نشد.");
+      }
+      const paymentDate = input.initialPayment?.paymentDate;
+      if (paymentDate && Number.isNaN(paymentDate.getTime())) throw new ApiError(400, "تاریخ پرداخت اولیه نامعتبر است.");
+    }
     const balanceDue = grandTotal - initialPayAmount;
 
     let paymentStatus: "unpaid" | "partial" | "paid" = "unpaid";
@@ -478,7 +488,7 @@ export async function createInvoice(input: CreateInvoiceInput) {
 
     // Process Initial Payment if provided
     if (input.initialPayment && initialPayAmount > 0) {
-      const payNum = `PAY-${Date.now().toString().slice(-6)}`;
+      const payNum = `PAY-${crypto.randomUUID()}`;
       const [createdPayment] = await tx
         .insert(payments)
         .values({
@@ -523,7 +533,8 @@ export async function createInvoice(input: CreateInvoiceInput) {
     }, undefined, tx);
 
     return createdInvoice;
-  });
+  };
+  return client ? operation(client) : db.transaction(operation);
 }
 
 /**

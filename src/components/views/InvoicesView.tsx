@@ -853,17 +853,20 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         </div>
       </div>
 
-      <div className="flex items-center gap-2 md:hidden">
-        <select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setInvoicePage(1); }} className="flex-1 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white">
+      <div className="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900/50 p-3 sm:flex-row sm:items-center">
+        <label htmlFor="invoice-sort-by" className="text-xs font-semibold text-slate-300">مرتب‌سازی بر اساس:</label>
+        <select id="invoice-sort-by" value={sortBy} onChange={(e) => { setSortBy(e.target.value); setInvoicePage(1); }} className="min-w-48 flex-1 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white sm:flex-none">
           <option value="createdAt">جدیدترین ثبت</option><option value="invoiceDate">تاریخ فاکتور</option>
           <option value="grandTotal">مبلغ کل</option><option value="balanceDue">مانده بدهی</option>
           <option value="employee">ویزیتور</option><option value="store">نام فروشگاه</option>
           <option value="invoiceNumber">شماره فاکتور</option><option value="status">وضعیت فاکتور</option>
           <option value="paymentStatus">وضعیت تسویه</option>
         </select>
-        <button type="button" onClick={() => setSortOrder((value) => value === "asc" ? "desc" : "asc")} className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white">
-          {sortOrder === "asc" ? "صعودی ↑" : "نزولی ↓"}
-        </button>
+        <label htmlFor="invoice-sort-order" className="text-xs font-semibold text-slate-300 sm:mr-2">ترتیب:</label>
+        <select id="invoice-sort-order" value={sortOrder} onChange={(e) => { setSortOrder(e.target.value as "asc" | "desc"); setInvoicePage(1); }} className="min-w-52 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white">
+          <option value="desc">بیشترین / جدیدترین به کمترین</option>
+          <option value="asc">کمترین / قدیمی‌ترین به بیشترین</option>
+        </select>
       </div>
 
       {/* Invoices List */}

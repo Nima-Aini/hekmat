@@ -2,29 +2,37 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, commissionLedger, customers, employees, expenses, invoices, payments, projects } from "@/db/schema";
+import { accounts, commissionLedger, commissionPaymentAllocations, customers, employees, expenses, invoices, payments, projects } from "@/db/schema";
 import { ApiError, apiError, assertUuid } from "@/lib/apiError";
 import { requirePermission } from "@/services/access";
 import { logAuditEvent } from "@/services/audit";
 
-const eligibleStatuses = new Set(["calculated", "pending", "payable"]);
 type CommissionRow = typeof commissionLedger.$inferSelect;
 
-function legacyCoveredCommissionIds(rows: CommissionRow[]) {
+function legacyCoverage(rows: CommissionRow[]) {
   let remaining = rows.reduce((sum, row) => {
     const amount = Number(row.commissionAmount) || 0;
     return row.commissionType === "payout" || amount < 0 ? sum + Math.abs(amount) : sum;
   }, 0);
-  const covered = new Set<string>();
+  const covered = new Map<string, number>();
   const oldestFirst = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   for (const row of oldestFirst) {
     const amount = Number(row.commissionAmount) || 0;
     if (remaining <= 0) break;
     if (amount <= 0 || row.commissionType === "payout" || row.status === "reversed" || row.status === "paid" || row.paymentId) continue;
-    covered.add(row.id);
-    remaining -= Math.min(remaining, amount);
+    const applied = Math.min(remaining, amount);
+    covered.set(row.id, applied);
+    remaining -= applied;
   }
   return covered;
+}
+
+function collectionPayable(commissionAmount: number, invoiceTotal: unknown, invoicePaid: unknown, invoiceStatus: unknown) {
+  if (invoiceStatus !== "issued" || commissionAmount <= 0) return 0;
+  const total = Number(invoiceTotal) || 0;
+  const paid = Math.max(0, Number(invoicePaid) || 0);
+  if (total <= 0) return 0;
+  return Math.min(commissionAmount, Math.round((commissionAmount * Math.min(1, paid / total)) * 100) / 100);
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -43,6 +51,10 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       invoiceNumber: invoices.invoiceNumber,
       invoiceDate: invoices.invoiceDate,
       invoiceTotal: invoices.grandTotal,
+      invoicePaidAmount: invoices.paidAmount,
+      invoiceBalanceDue: invoices.balanceDue,
+      invoicePaymentStatus: invoices.paymentStatus,
+      invoiceStatus: invoices.status,
       storeName: customers.storeName,
       customerName: customers.name,
       projectName: projects.name,
@@ -57,33 +69,54 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       .orderBy(desc(commissionLedger.createdAt));
 
     const ledgerRows = rows.map((row) => row.commission);
-    const legacyCovered = legacyCoveredCommissionIds(ledgerRows);
-    let totalEarned = 0, legacyPaid = 0, selectedRowsPaid = 0;
+    const allocationRows = ledgerRows.length ? await db.select().from(commissionPaymentAllocations)
+      .where(inArray(commissionPaymentAllocations.commissionLedgerId, ledgerRows.map((row) => row.id))) : [];
+    const allocatedByCommission = new Map<string, number>();
+    for (const allocation of allocationRows) allocatedByCommission.set(
+      allocation.commissionLedgerId,
+      (allocatedByCommission.get(allocation.commissionLedgerId) || 0) + Number(allocation.amount || 0),
+    );
+    const legacyCovered = legacyCoverage(ledgerRows);
+    let totalEarned = 0, legacyPaid = 0, selectedRowsPaid = 0, totalPayableByCollection = 0;
     const commissions = rows.map(({ commission, ...details }) => {
       const amount = Number(commission.commissionAmount) || 0;
       const isLegacyPayout = commission.commissionType === "payout" || amount < 0;
       if (isLegacyPayout) legacyPaid += Math.abs(amount);
       else if (commission.status !== "reversed") {
         totalEarned += amount;
-        if (commission.status === "paid" || commission.paymentId) selectedRowsPaid += amount;
+        const allocated = allocatedByCommission.get(commission.id) || 0;
+        if (allocated > 0) selectedRowsPaid += allocated;
+        else if (commission.status === "paid" || commission.paymentId) selectedRowsPaid += amount;
       }
+      const legacyAmount = legacyCovered.get(commission.id) || 0;
+      const allocationAmount = allocatedByCommission.get(commission.id) || 0;
+      const directlyPaidAmount = allocationAmount === 0 && (commission.status === "paid" || commission.paymentId) ? amount : 0;
+      const alreadyPaidCommission = Math.min(Math.max(0, amount), allocationAmount + directlyPaidAmount + legacyAmount);
+      const payableByCollection = collectionPayable(amount, details.invoiceTotal, details.invoicePaidAmount, details.invoiceStatus);
+      const remainingPayable = Math.max(0, payableByCollection - alreadyPaidCommission);
+      if (!isLegacyPayout && commission.status !== "reversed") totalPayableByCollection += payableByCollection;
       return {
         ...commission,
         ...details,
         storeName: details.storeName || details.customerName || null,
-        legacyCovered: legacyCovered.has(commission.id),
-        eligibleForPayout: !legacyCovered.has(commission.id) && !isLegacyPayout && amount > 0 && !commission.paymentId && eligibleStatuses.has(commission.status),
+        commissionRate: Number(commission.baseAmount) > 0 ? (amount / Number(commission.baseAmount)) * 100 : 0,
+        alreadyPaidCommission,
+        payableByCollection,
+        remainingPayable,
+        legacyCovered: legacyAmount > 0,
+        eligibleForPayout: !isLegacyPayout && amount > 0 && remainingPayable > 0 && commission.status !== "reversed",
       };
     });
 
     const totalPaid = legacyPaid + selectedRowsPaid;
+    const remainingPayable = Math.max(0, totalPayableByCollection - totalPaid);
     const balancePending = Math.max(0, totalEarned - totalPaid);
     const availableAccounts = await db.select().from(accounts).where(eq(accounts.status, "active"));
     return NextResponse.json({
       success: true,
       employee: emp,
       commissions,
-      summary: { totalEarned, totalPaid, balancePending },
+      summary: { totalEarned, totalPayableByCollection, totalPaid, remainingPayable, balancePending },
       accounts: availableAccounts.map((account) => ({ ...account, balance: Number(account.balance) })),
     });
   } catch (error) {
@@ -114,23 +147,44 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         .for("update");
       const selected = employeeLedger.filter((row) => commissionIds.includes(row.id));
       if (selected.length !== commissionIds.length) throw new ApiError(404, "یک یا چند پورسانت انتخاب‌شده یافت نشد.");
-      const legacyCovered = legacyCoveredCommissionIds(employeeLedger);
+      const legacyCovered = legacyCoverage(employeeLedger);
+      const selectedInvoiceIds = Array.from(new Set(selected.map((row) => row.invoiceId).filter((value): value is string => Boolean(value))));
+      const invoiceRows = selectedInvoiceIds.length ? await tx.select({
+        id: invoices.id,
+        grandTotal: invoices.grandTotal,
+        paidAmount: invoices.paidAmount,
+        status: invoices.status,
+      }).from(invoices).where(inArray(invoices.id, selectedInvoiceIds)).for("update") : [];
+      const invoiceById = new Map(invoiceRows.map((invoice) => [invoice.id, invoice]));
+      const existingAllocations = await tx.select().from(commissionPaymentAllocations)
+        .where(inArray(commissionPaymentAllocations.commissionLedgerId, commissionIds)).for("update");
+      const allocatedByCommission = new Map<string, number>();
+      for (const allocation of existingAllocations) allocatedByCommission.set(
+        allocation.commissionLedgerId,
+        (allocatedByCommission.get(allocation.commissionLedgerId) || 0) + Number(allocation.amount || 0),
+      );
+      const payoutAmounts = new Map<string, number>();
       for (const row of selected) {
         const amount = Number(row.commissionAmount);
+        const invoice = row.invoiceId ? invoiceById.get(row.invoiceId) : null;
+        const allocated = allocatedByCommission.get(row.id) || 0;
+        const legacyAmount = legacyCovered.get(row.id) || 0;
+        const directPaid = allocated === 0 && (row.status === "paid" || row.paymentId) ? amount : 0;
+        const alreadyPaid = Math.min(Math.max(0, amount), allocated + legacyAmount + directPaid);
+        const payable = invoice ? collectionPayable(amount, invoice.grandTotal, invoice.paidAmount, invoice.status) : 0;
+        const remaining = Math.round(Math.max(0, payable - alreadyPaid) * 100) / 100;
         if (
           (row.employeeId !== id && row.recipientEmployeeId !== id) ||
           row.commissionType === "payout" ||
           row.status === "reversed" ||
-          row.status === "paid" ||
-          Boolean(row.paymentId) ||
-          legacyCovered.has(row.id) ||
-          !eligibleStatuses.has(row.status) ||
           !Number.isFinite(amount) ||
-          amount <= 0
-        ) throw new ApiError(409, "یک یا چند پورسانت انتخاب‌شده قبلاً پرداخت شده یا قابل پرداخت نیست.");
+          amount <= 0 ||
+          remaining <= 0
+        ) throw new ApiError(409, "یک یا چند پورسانت انتخاب‌شده بر اساس وصول مشتری، مبلغ قابل پرداخت ندارد یا قبلاً پرداخت شده است.");
+        payoutAmounts.set(row.id, remaining);
       }
 
-      const amount = selected.reduce((sum, row) => sum + Number(row.commissionAmount), 0);
+      const amount = Array.from(payoutAmounts.values()).reduce((sum, value) => sum + value, 0);
       const [account] = await tx.select().from(accounts)
         .where(and(eq(accounts.id, body.accountId), eq(accounts.status, "active"))).for("update").limit(1);
       if (!account) throw new ApiError(404, "حساب فعال مورد نظر یافت نشد.");
@@ -158,13 +212,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         description: `${notes} - سند پرداخت ${paymentNumber}${referenceNumber ? ` - پیگیری ${referenceNumber}` : ""}`,
         expenseDate: paymentDate,
       }).returning();
-      await tx.update(commissionLedger).set({ status: "paid", paymentId: payment.id })
-        .where(inArray(commissionLedger.id, commissionIds));
+      await tx.insert(commissionPaymentAllocations).values(selected.map((row) => ({
+        commissionLedgerId: row.id,
+        paymentId: payment.id,
+        amount: payoutAmounts.get(row.id)!.toString(),
+      })));
+      for (const row of selected) {
+        const previousAllocated = allocatedByCommission.get(row.id) || 0;
+        const newAllocated = previousAllocated + (payoutAmounts.get(row.id) || 0);
+        const fullyPaid = newAllocated >= Number(row.commissionAmount) - 0.005;
+        await tx.update(commissionLedger).set({
+          status: fullyPaid ? "paid" : "payable",
+          paymentId: fullyPaid && previousAllocated === 0 ? payment.id : null,
+        }).where(eq(commissionLedger.id, row.id));
+      }
       await logAuditEvent("COMMISSION_PAYOUT", "commission_ledger", selected[0].id, {
         employeeId: emp.id, commissionIds, invoiceIds: selected.map((row) => row.invoiceId).filter(Boolean),
         amount, accountId: account.id, expenseNumber, paymentNumber,
       }, undefined, tx);
-      return { amount, payment, expense, commissionIds };
+      return { amount, payment, expense, commissionIds, allocations: Object.fromEntries(payoutAmounts) };
     });
 
     return NextResponse.json({

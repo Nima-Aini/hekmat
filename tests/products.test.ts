@@ -23,7 +23,7 @@ vi.mock("@/services/access", async () => {
 });
 import * as schema from "../src/db/schema";
 import { migrateDatabase } from "../src/db/migrate";
-import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, customerAssignments, customerProjectMemberships, invoices, invoiceItems, productionBatches, commissionRules, commissionLedger, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers, accounts, payments, paymentAllocations, employees, alerts, expenses } from "../src/db/schema";
+import { products, productRecipes, rawMaterials, projectProductPrices, projects, customers, customerAssignments, customerProjectMemberships, invoices, invoiceItems, productionBatches, commissionRules, commissionLedger, commissionPaymentAllocations, consignmentItems, inventoryLedger, purchaseItems, warehouses, consignments, purchases, suppliers, accounts, payments, paymentAllocations, employees, alerts, expenses, orders, tasks } from "../src/db/schema";
 import { DELETE, PUT } from "../src/app/api/products/[id]/route";
 import { POST, GET } from "../src/app/api/products/route";
 import { DELETE as deleteSpecial } from "../src/app/api/special-products/[id]/route";
@@ -32,7 +32,9 @@ import { productInput } from "../src/services/product";
 import { assignCustomer } from "../src/services/partner";
 import { GET as getCommissions, POST as payoutCommissions } from "../src/app/api/employees/[id]/commissions/route";
 import { GET as getInvoices } from "../src/app/api/invoices/route";
+import { POST as createInvoiceRoute } from "../src/app/api/invoices/route";
 import { runAlertsEngineScan } from "../src/services/alerts";
+import { createOrder, convertOrderToInvoice } from "../src/services/order";
 const pg = new PGlite();
 const database = drizzle(pg);
 const dialect = new PgDialect();
@@ -59,7 +61,7 @@ describe("Production product lifecycle against PostgreSQL", () => {
     const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری پورسانت انتخابی", mobile: "09125550002" }).returning();
     const commissionIds: string[] = [];
     for (const amount of [100, 200, 300]) {
-      const [invoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: String(amount * 10) }).returning();
+      const [invoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: String(amount * 10), paidAmount: String(amount * 10), balanceDue: "0", paymentStatus: "paid" }).returning();
       const [commission] = await database.insert(commissionLedger).values({
         employeeId: employee.id, recipientEmployeeId: employee.id, invoiceId: invoice.id,
         ruleSnapshot: { rateValue: 10 }, baseAmount: String(amount * 10), commissionAmount: String(amount), status: "payable",
@@ -79,7 +81,7 @@ describe("Production product lifecycle against PostgreSQL", () => {
     expect(await database.select().from(expenses).where(eq(expenses.id, payload.expense.id))).toHaveLength(1);
     expect((await payoutCommissions(request(body), params(employee.id))).status).toBe(409);
 
-    const [raceInvoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: "500" }).returning();
+    const [raceInvoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: "500", paidAmount: "500", balanceDue: "0", paymentStatus: "paid" }).returning();
     const [raceCommission] = await database.insert(commissionLedger).values({
       employeeId: employee.id, recipientEmployeeId: employee.id, invoiceId: raceInvoice.id,
       ruleSnapshot: { rateValue: 10 }, baseAmount: "500", commissionAmount: "50", status: "payable",
@@ -99,7 +101,7 @@ describe("Production product lifecycle against PostgreSQL", () => {
     const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری پورسانت قدیمی", mobile: "09125550012" }).returning();
     const positiveIds: string[] = [];
     for (const [index, amount] of [100, 200].entries()) {
-      const [invoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: String(amount) }).returning();
+      const [invoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: String(amount), paidAmount: String(amount), balanceDue: "0", paymentStatus: "paid" }).returning();
       const [row] = await database.insert(commissionLedger).values({
         employeeId: employee.id, invoiceId: invoice.id, ruleSnapshot: {}, baseAmount: String(amount),
         commissionAmount: String(amount), status: "pending", createdAt: new Date(`2025-01-0${index + 1}T00:00:00Z`),
@@ -115,6 +117,45 @@ describe("Production product lifecycle against PostgreSQL", () => {
     expect(payload.commissions.find((row: any) => row.id === positiveIds[1]).eligibleForPayout).toBe(true);
     expect(payload.summary).toMatchObject({ totalEarned: 300, totalPaid: 100, balancePending: 200 });
     expect((await payoutCommissions(request({ commissionIds: [positiveIds[0]], accountId: account.id }), params(employee.id))).status).toBe(409);
+  });
+
+  it("releases commission only in proportion to newly collected invoice value", async () => {
+    const [employee] = await database.insert(employees).values({ code: randomUUID(), name: "همکار وصول مرحله‌ای", mobile: "09125550101" }).returning();
+    const [account] = await database.insert(accounts).values({ code: randomUUID(), name: "حساب وصول مرحله‌ای", type: "bank", balance: "1000" }).returning();
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری وصول مرحله‌ای", mobile: "09125550102" }).returning();
+    const [invoice] = await database.insert(invoices).values({ invoiceNumber: randomUUID(), customerId: customer.id, employeeId: employee.id, grandTotal: "1000", paidAmount: "400", balanceDue: "600", paymentStatus: "partial" }).returning();
+    const [commission] = await database.insert(commissionLedger).values({ employeeId: employee.id, recipientEmployeeId: employee.id, invoiceId: invoice.id, baseAmount: "1000", commissionAmount: "100", ruleSnapshot: { rateValue: 10 }, status: "payable" }).returning();
+    const body = { commissionIds: [commission.id], accountId: account.id, paymentMethod: "bank_transfer" };
+    const first = await payoutCommissions(request(body), params(employee.id));
+    expect(first.status).toBe(200);
+    expect((await first.json()).amount).toBe(40);
+    expect((await payoutCommissions(request(body), params(employee.id))).status).toBe(409);
+    await database.update(invoices).set({ paidAmount: "700", balanceDue: "300", paymentStatus: "partial" }).where(eq(invoices.id, invoice.id));
+    const second = await payoutCommissions(request(body), params(employee.id));
+    expect(second.status).toBe(200);
+    expect((await second.json()).amount).toBe(30);
+    expect(await database.select().from(commissionPaymentAllocations).where(eq(commissionPaymentAllocations.commissionLedgerId, commission.id))).toHaveLength(2);
+    expect(Number((await database.select().from(accounts).where(eq(accounts.id, account.id)))[0].balance)).toBe(930);
+  });
+
+  it("keeps orders non-financial, converts once, and deduplicates note reminders", async () => {
+    const product = await create();
+    await database.update(products).set({ stockQuantity: "5" }).where(eq(products.id, product.id));
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری سفارش", mobile: "09125550111" }).returning();
+    const order = await createOrder({ customerId: customer.id, requestKey: randomUUID(), requestHash: "stable", items: [{ productId: product.id, quantity: 2, unitPrice: 100 }] });
+    expect(Number((await database.select().from(products).where(eq(products.id, product.id)))[0].stockQuantity)).toBe(5);
+    const invoice = await convertOrderToInvoice(order.id, "test-user");
+    expect(Number((await database.select().from(products).where(eq(products.id, product.id)))[0].stockQuantity)).toBe(3);
+    expect((await database.select().from(orders).where(eq(orders.id, order.id)))[0].convertedInvoiceId).toBe(invoice.id);
+    await expect(convertOrderToInvoice(order.id, "test-user")).rejects.toThrow(/قبلاً/);
+
+    const [note] = await database.insert(tasks).values({ title: "پیگیری سفارش", description: "تست یادآوری", entityType: "note", status: "pending", dueDate: new Date() }).returning();
+    await runAlertsEngineScan();
+    await runAlertsEngineScan();
+    expect(await database.select().from(alerts).where(eq(alerts.dedupKey, `note_due_${note.id}`))).toHaveLength(1);
+    await database.update(tasks).set({ status: "completed", completedAt: new Date() }).where(eq(tasks.id, note.id));
+    await runAlertsEngineScan();
+    expect((await database.select().from(alerts).where(eq(alerts.dedupKey, `note_due_${note.id}`)))[0].status).toBe("auto_closed");
   });
 
   it("sorts the complete invoice result before pagination", async () => {
@@ -322,6 +363,20 @@ describe("Production product lifecycle against PostgreSQL", () => {
     const [recalculated] = await database.select().from(invoices).where(eq(invoices.id, invoice.id));
     expect(recalculated.paymentStatus).toBe("partial");
     expect(recalculated.settlementDate).toBeNull();
+  });
+  it("normalizes and validates initial payment at the invoice API boundary", async () => {
+    const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری پرداخت API", mobile: "09121111112" }).returning();
+    const [account] = await database.insert(accounts).values({ code: randomUUID(), name: "حساب پرداخت API", type: "cash" }).returning();
+    const paymentDate = "2026-08-30T08:30:00.000Z";
+    const valid = await createInvoiceRoute(request({ customerId: customer.id, items: [{ isCustom: true, productName: "خدمت", quantity: 1, unitPrice: 500 }], initialPayment: { amount: 200, accountId: account.id, paymentMethod: "cash", paymentDate } }));
+    expect(valid.status).toBe(200);
+    const created = (await valid.json()).invoice;
+    const [storedPayment] = await database.select().from(payments).where(eq(payments.invoiceId, created.id));
+    const [allocation] = await database.select().from(paymentAllocations).where(eq(paymentAllocations.invoiceId, created.id));
+    expect(storedPayment.paymentDate.toISOString()).toBe(paymentDate);
+    expect(Number(allocation.allocatedAmount)).toBe(200);
+    expect((await createInvoiceRoute(request({ customerId: customer.id, items: [{ isCustom: true, productName: "خدمت", quantity: 1, unitPrice: 500 }], initialPayment: { amount: 1, accountId: account.id, paymentDate: "not-a-date" } }))).status).toBe(400);
+    expect((await createInvoiceRoute(request({ customerId: customer.id, items: [{ isCustom: true, productName: "خدمت", quantity: 1, unitPrice: 500 }], initialPayment: { amount: 600, accountId: account.id } }))).status).toBe(400);
   });
   it("permanently deletes an issued invoice while preserving real payments", async () => {
     const p = await create();

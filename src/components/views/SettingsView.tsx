@@ -15,6 +15,7 @@ export const SettingsView: React.FC = () => {
     companyAddress: "",
     companyPhone: "",
     taxOffice: "",
+    taxpayerType: "legal",
     taxRateCorporate: 25,
     vatRate: 10,
     currency: "تومان",
@@ -45,6 +46,7 @@ export const SettingsView: React.FC = () => {
           companyAddress: res.settings.companyAddress || "",
           companyPhone: res.settings.companyPhone || "",
           taxOffice: res.settings.taxOffice || "",
+          taxpayerType: res.settings.taxpayerType || "legal",
           taxRateCorporate: res.settings.taxRateCorporate !== undefined ? res.settings.taxRateCorporate : 25,
           vatRate: res.settings.vatRate !== undefined ? res.settings.vatRate : 10,
           currency: res.settings.currency || "تومان",
@@ -231,10 +233,17 @@ export const SettingsView: React.FC = () => {
         <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl space-y-5">
           <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
             <Percent className="h-5 w-5 text-amber-400" />
-            <h3 className="font-bold text-white text-sm">پارامترهای مالیاتی و محاسبه اظهارنامه</h3>
+            <h3 className="font-bold text-white text-sm">پارامترهای گزارش آماده‌سازی مالیاتی</h3>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-slate-300 mb-1.5 font-medium">نوع مؤدی</label>
+              <select value={form.taxpayerType} onChange={(e) => setForm({ ...form, taxpayerType: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white focus:border-amber-500 focus:outline-none">
+                <option value="legal">شخص حقوقی</option>
+                <option value="individual">شخص حقیقی</option>
+              </select>
+            </div>
             <div>
               <label className="block text-slate-300 mb-1.5 font-medium">اداره کل و حوزه مالیاتی</label>
               <input
@@ -257,7 +266,7 @@ export const SettingsView: React.FC = () => {
                 placeholder="۲۵"
                 className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white font-mono focus:border-amber-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">نرخ قانونی ماده ۱۰۵ ق.م.م (معمولاً ۲۵٪ اشخاص حقوقی)</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">نرخ قراردادی/قانونی دوره را پس از تأیید مشاور مالیاتی وارد کنید.</span>
             </div>
 
             <div>
@@ -271,7 +280,7 @@ export const SettingsView: React.FC = () => {
                 placeholder="۱۰"
                 className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white font-mono focus:border-amber-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">نرخ قانون مالیات بر ارزش افزوده (۱۰٪ مصوب)</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">نرخ دوره را از بخشنامه و وضعیت کالای مشمول کنترل کنید.</span>
             </div>
           </div>
         </div>

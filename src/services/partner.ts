@@ -2,7 +2,7 @@ import { db } from "@/db";
 import {
   employees, customers, invoices, commissionLedger, payments, tasks,
   customerAssignments, customerProjectMemberships, employeeProjectAssignments, projects, projectTargets,
-  projectCompensations, employeeAccounts, roles, permissions, rolePermissions,
+  projectCompensations, employeeAccounts, roles, permissions, rolePermissions, orders,
 } from "@/db/schema";
 import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { logAuditEvent } from "@/services/audit";
@@ -19,7 +19,7 @@ function dateRange(period: string) {
 }
 
 export async function getEmployeeDashboard(employeeId: string, period = "month") {
-  const [{ value: sales = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${invoices.grandTotal}),0)` }).from(invoices).where(eq(invoices.employeeId, employeeId));
+  const [{ value: sales = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${invoices.grandTotal}),0)` }).from(invoices).where(and(eq(invoices.employeeId, employeeId), eq(invoices.status, "issued")));
   const { start, end } = dateRange(period);
   const [{ value: periodSales = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${invoices.grandTotal}),0)` }).from(invoices).where(and(eq(invoices.employeeId, employeeId), gte(invoices.invoiceDate, start), lte(invoices.invoiceDate, end), eq(invoices.status, "issued")));
   const [{ value: periodCommission = "0" } = {}] = await db.select({
@@ -31,13 +31,13 @@ export async function getEmployeeDashboard(employeeId: string, period = "month")
   const [{ count: customersCount = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(customers).where(eq(customers.assignedEmployeeId, employeeId));
   const [{ count: activeCustomers = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(customers).where(and(eq(customers.assignedEmployeeId, employeeId), eq(customers.status, "active")));
   const [{ count: riskyCustomers = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(customers).where(and(eq(customers.assignedEmployeeId, employeeId), or(eq(customers.healthStatus, "red"), eq(customers.healthStatus, "yellow"))));
-  const [{ count: orders = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(invoices).where(eq(invoices.employeeId, employeeId));
+  const [{ count: orderCount = 0 } = {}] = await db.select({ count: sql<number>`COUNT(*)` }).from(orders).where(and(eq(orders.employeeId, employeeId), inArray(orders.status, ["open", "ready"])));
   const [{ value: todaySales = "0" } = {}] = await db.select({ value: sql<string>`COALESCE(SUM(${invoices.grandTotal}),0)` }).from(invoices).where(and(eq(invoices.employeeId, employeeId), gte(invoices.invoiceDate, new Date(new Date().setHours(0,0,0,0))), eq(invoices.status, "issued")));
   return {
     sales: Number(sales), periodSales: Number(periodSales), todaySales: Number(todaySales),
     periodCommission: Number(periodCommission), paidCommission: Number(paidCommission),
     unpaidCommission: Math.max(0, Number(periodCommission) - Number(paidCommission)),
-    customers: Number(customersCount), activeCustomers: Number(activeCustomers), riskyCustomers: Number(riskyCustomers), orders: Number(orders),
+    customers: Number(customersCount), activeCustomers: Number(activeCustomers), riskyCustomers: Number(riskyCustomers), orders: Number(orderCount),
   };
 }
 

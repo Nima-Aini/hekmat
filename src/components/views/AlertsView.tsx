@@ -8,7 +8,7 @@ import { toJalaliDate } from "@/lib/dateUtils";
 export function getAlertNavigation(alert: { entityType?: string | null; entityId?: string | null }) {
   const tabByType: Record<string, string> = {
     invoice: "invoices", raw_material: "raw_materials", product: "products",
-    customer: "customers", employee: "employees", project: "projects",
+    customer: "customers", employee: "employees", project: "projects", order: "orders", note: "notes",
   };
   if (!alert.entityType || !alert.entityId || !tabByType[alert.entityType]) return null;
   return { tab: tabByType[alert.entityType], type: alert.entityType, id: alert.entityId };
@@ -17,13 +17,20 @@ export function getAlertNavigation(alert: { entityType?: string | null; entityId
 export const AlertsView: React.FC<{ selectedProjectId: string | null; onNavigate?: (tab: string) => void }> = ({ selectedProjectId, onNavigate }) => {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
+  const [status, setStatus] = useState("unresolved");
+  const [severity, setSeverity] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
 
   const fetchAlerts = async () => {
     setLoading(true);
     try {
-      const projParam = selectedProjectId ? `?projectId=${selectedProjectId}` : "";
-      const res = await fetch(`/api/alerts${projParam}`).then((r) => r.json());
-      if (res.success) setAlerts(res.alerts || []);
+      const params = new URLSearchParams({ page: String(page), pageSize: "20", status, sortBy });
+      if (selectedProjectId) params.set("projectId", selectedProjectId);
+      if (severity) params.set("severity", severity);
+      const res = await fetch(`/api/alerts?${params}`).then((r) => r.json());
+      if (res.success) { setAlerts(res.alerts || []); setPagination(res.pagination || { total: 0, totalPages: 1 }); }
     } catch (err) {
       console.error("Error fetching alerts:", err);
     } finally {
@@ -33,7 +40,7 @@ export const AlertsView: React.FC<{ selectedProjectId: string | null; onNavigate
 
   useEffect(() => {
     fetchAlerts();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, page, status, severity, sortBy]);
 
   const handleResolve = async (event: React.MouseEvent, alertId: string) => {
     event.stopPropagation();
@@ -79,8 +86,14 @@ export const AlertsView: React.FC<{ selectedProjectId: string | null; onNavigate
         </button>
       </div>
 
+      <div className="grid gap-2 rounded-2xl border border-slate-800 bg-slate-900/50 p-3 sm:grid-cols-3">
+        <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="rounded-xl bg-slate-950 p-2.5 text-xs"><option value="unresolved">حل‌نشده</option><option value="resolved">حل‌شده / بسته‌شده</option><option value="all">همه اعلان‌ها</option></select>
+        <select value={severity} onChange={(e) => { setSeverity(e.target.value); setPage(1); }} className="rounded-xl bg-slate-950 p-2.5 text-xs"><option value="">همه شدت‌ها</option><option value="critical">بحرانی</option><option value="warning">هشدار</option><option value="info">اطلاعاتی</option></select>
+        <select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(1); }} className="rounded-xl bg-slate-950 p-2.5 text-xs"><option value="newest">جدیدترین</option><option value="oldest">قدیمی‌ترین</option><option value="severity">شدت</option></select>
+      </div>
+
       <div className="space-y-3">
-        {alerts.length > 0 ? (
+        {loading && alerts.length === 0 ? <div className="rounded-2xl border border-slate-800 p-12 text-center text-slate-400"><RefreshCw className="mx-auto mb-2 h-6 w-6 animate-spin" />در حال پایش و دریافت اعلان‌ها…</div> : alerts.length > 0 ? (
           alerts.map((a) => (
             <div
               key={a.id}
@@ -124,6 +137,7 @@ export const AlertsView: React.FC<{ selectedProjectId: string | null; onNavigate
           </div>
         )}
       </div>
+      {pagination.totalPages > 1 && <div className="flex justify-center gap-2"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border border-slate-700 px-3 py-2 disabled:opacity-30">قبلی</button><span className="p-2 text-xs">{page.toLocaleString("fa-IR")} / {pagination.totalPages.toLocaleString("fa-IR")}</span><button disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} className="rounded-lg border border-slate-700 px-3 py-2 disabled:opacity-30">بعدی</button></div>}
     </div>
   );
 };

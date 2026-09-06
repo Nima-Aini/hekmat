@@ -48,11 +48,13 @@ import { numberToPersianWords } from "@/lib/numberToWords";
 import { triggerTaxDeclarationPrint } from "@/lib/taxPrintHelper";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { AdvancedReportsPanel } from "@/components/views/AdvancedReportsPanel";
 
 export const ReportsView: React.FC<{
   selectedProjectId: string | null;
   initialTab?: "financial" | "tax_declaration" | "sales" | "inflation" | "comparison";
-}> = ({ selectedProjectId, initialTab = "financial" }) => {
+  taxOnly?: boolean;
+}> = ({ selectedProjectId, initialTab = "financial", taxOnly = false }) => {
   const [activeTab, setActiveTab] = useState<"financial" | "tax_declaration" | "sales" | "inflation" | "comparison">(initialTab);
 
   useEffect(() => {
@@ -70,29 +72,29 @@ export const ReportsView: React.FC<{
   const [taxData, setTaxData] = useState<any>(null);
   const [taxLoading, setTaxLoading] = useState(false);
   const [taxPreset, setTaxPreset] = useState(() => {
-    const curYear = gregorianToJalali(new Date()).year || 1405;
+    const curYear = gregorianToJalali(new Date()).year;
     return `year${curYear}`;
   });
   const [taxJalaliStart, setTaxJalaliStart] = useState(() => {
-    const curYear = gregorianToJalali(new Date()).year || 1405;
+    const curYear = gregorianToJalali(new Date()).year;
     return `${curYear}/01/01`;
   });
   const [taxJalaliEnd, setTaxJalaliEnd] = useState(() => {
-    const curYear = gregorianToJalali(new Date()).year || 1405;
+    const curYear = gregorianToJalali(new Date()).year;
     return `${curYear}/12/29`;
   });
   const [taxStartDate, setTaxStartDate] = useState(() => {
-    const curYear = gregorianToJalali(new Date()).year || 1405;
+    const curYear = gregorianToJalali(new Date()).year;
     return jalaliToGregorian({ year: curYear, month: 1, day: 1 }).toISOString().split("T")[0];
   });
   const [taxEndDate, setTaxEndDate] = useState(() => {
-    const curYear = gregorianToJalali(new Date()).year || 1405;
+    const curYear = gregorianToJalali(new Date()).year;
     return jalaliToGregorian({ year: curYear, month: 12, day: 29 }).toISOString().split("T")[0];
   });
   const [taxDateError, setTaxDateError] = useState("");
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const taxDocRef = useRef<HTMLDivElement>(null);
-  const [docTrackingNumber] = useState(() => `TX-${Math.floor(10000000 + Math.random() * 90000000)}`);
+  const docTrackingNumber = `PREP-${taxStartDate}-${taxEndDate}`;
   const [docCreationDate] = useState(() => toJalaliDate(new Date()));
 
   // Inflation simulator state
@@ -162,46 +164,18 @@ export const ReportsView: React.FC<{
   const handlePresetChange = (preset: string) => {
     setTaxPreset(preset);
     setTaxDateError("");
-    let jStart = { year: 1404, month: 1, day: 1 };
-    let jEnd = { year: 1404, month: 12, day: 29 };
-
-    if (preset === "year1404") {
-      jStart = { year: 1404, month: 1, day: 1 };
-      jEnd = { year: 1404, month: 12, day: 29 };
-    } else if (preset === "year1405") {
-      jStart = { year: 1405, month: 1, day: 1 };
-      jEnd = { year: 1405, month: 12, day: 29 };
-    } else if (preset === "range1404_1405") {
-      jStart = { year: 1404, month: 1, day: 1 };
-      jEnd = { year: 1405, month: 12, day: 29 };
-    } else if (preset === "year1403") {
-      jStart = { year: 1403, month: 1, day: 1 };
-      jEnd = { year: 1403, month: 12, day: 29 };
-    } else if (preset === "spring1404") {
-      jStart = { year: 1404, month: 1, day: 1 };
-      jEnd = { year: 1404, month: 3, day: 31 };
-    } else if (preset === "summer1404") {
-      jStart = { year: 1404, month: 4, day: 1 };
-      jEnd = { year: 1404, month: 6, day: 31 };
-    } else if (preset === "autumn1404") {
-      jStart = { year: 1404, month: 7, day: 1 };
-      jEnd = { year: 1404, month: 9, day: 30 };
-    } else if (preset === "winter1404") {
-      jStart = { year: 1404, month: 10, day: 1 };
-      jEnd = { year: 1404, month: 12, day: 29 };
-    } else if (preset === "spring1405") {
-      jStart = { year: 1405, month: 1, day: 1 };
-      jEnd = { year: 1405, month: 3, day: 31 };
-    } else if (preset === "summer1405") {
-      jStart = { year: 1405, month: 4, day: 1 };
-      jEnd = { year: 1405, month: 6, day: 31 };
-    } else if (preset === "autumn1405") {
-      jStart = { year: 1405, month: 7, day: 1 };
-      jEnd = { year: 1405, month: 9, day: 30 };
-    } else if (preset === "winter1405") {
-      jStart = { year: 1405, month: 10, day: 1 };
-      jEnd = { year: 1405, month: 12, day: 29 };
-    }
+    const currentYear = gregorianToJalali(new Date()).year;
+    const match = preset.match(/^(year|spring|summer|autumn|winter)(\d{4})$/);
+    const year = match ? Number(match[2]) : currentYear;
+    const season = match?.[1] || "year";
+    const ranges: Record<string, [{ year: number; month: number; day: number }, { year: number; month: number; day: number }]> = {
+      year: [{ year, month: 1, day: 1 }, { year, month: 12, day: 29 }],
+      spring: [{ year, month: 1, day: 1 }, { year, month: 3, day: 31 }],
+      summer: [{ year, month: 4, day: 1 }, { year, month: 6, day: 31 }],
+      autumn: [{ year, month: 7, day: 1 }, { year, month: 9, day: 30 }],
+      winter: [{ year, month: 10, day: 1 }, { year, month: 12, day: 29 }],
+    };
+    const [jStart, jEnd] = ranges[season] || ranges.year;
 
     const startJalaliStr = jalaliToString(jStart);
     const endJalaliStr = jalaliToString(jEnd);
@@ -412,6 +386,7 @@ export const ReportsView: React.FC<{
 
   const kpis = financialData?.kpis || {};
   const waterfallData = financialData?.waterfallData || [];
+  const currentJalaliYear = gregorianToJalali(new Date()).year;
 
   return (
     <div className="space-y-6">
@@ -420,14 +395,14 @@ export const ReportsView: React.FC<{
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <BarChart2 className="h-6 w-6 text-purple-400" />
-            مرکز گزارشات مدیریتی، سود و زیان (P&L) و اظهارنامه مالیاتی
+            {taxOnly ? "گزارش آماده‌سازی اظهارنامه مالیاتی" : "مرکز گزارشات مدیریتی و سود و زیان (P&L)"}
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            داده‌های عملیاتی یکپارچه از فروش ویزیتوری، انبارداری، حساب‌ها و اظهارنامه مالیاتی رسمی
+            {taxOnly ? "خروجی کمکی برای کنترل و آماده‌سازی؛ ارسال رسمی فقط از مسیر سامانه‌های سازمان امور مالیاتی انجام می‌شود." : "داده‌های عملیاتی یکپارچه از فروش، وصول، انبارداری و حساب‌ها"}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 rounded-2xl bg-slate-900 p-1.5 border border-slate-800 text-xs font-semibold">
+        {!taxOnly && <div className="flex flex-wrap items-center gap-1.5 rounded-2xl bg-slate-900 p-1.5 border border-slate-800 text-xs font-semibold">
           <button
             onClick={() => setActiveTab("financial")}
             className={`rounded-xl px-3.5 py-2 transition ${
@@ -435,15 +410,6 @@ export const ReportsView: React.FC<{
             }`}
           >
             سود و زیان (P&L)
-          </button>
-          <button
-            onClick={() => setActiveTab("tax_declaration")}
-            className={`rounded-xl px-3.5 py-2 transition flex items-center gap-1.5 ${
-              activeTab === "tax_declaration" ? "bg-amber-600 text-white shadow-lg shadow-amber-600/30" : "text-slate-400 hover:text-white"
-            }`}
-          >
-            <FileText className="h-3.5 w-3.5" />
-            اظهارنامه مالیاتی (PDF)
           </button>
           <button
             onClick={() => setActiveTab("sales")}
@@ -469,7 +435,7 @@ export const ReportsView: React.FC<{
           >
             مقایسه پروژه‌ها
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Tab: Tax Declaration (اظهارنامه مالیاتی رسمی) */}
@@ -480,7 +446,7 @@ export const ReportsView: React.FC<{
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-white font-bold text-sm">
                 <FileSpreadsheet className="h-5 w-5 text-amber-400" />
-                تنظیم دوره و بازه زمانی شمسی برای صدور اظهارنامه مالیاتی
+                تنظیم دوره گزارش آماده‌سازی مالیاتی
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -489,7 +455,7 @@ export const ReportsView: React.FC<{
                   className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 px-3.5 py-2 text-xs font-bold text-slate-200 transition cursor-pointer disabled:opacity-50"
                 >
                   <Printer className="h-4 w-4 text-slate-400" />
-                  چاپ اظهارنامه
+                  چاپ گزارش
                 </button>
                 <button
                   onClick={handleDownloadTaxPdf}
@@ -497,7 +463,7 @@ export const ReportsView: React.FC<{
                   className="flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-amber-600/30 transition cursor-pointer disabled:opacity-50"
                 >
                   <Download className="h-4 w-4" />
-                  {generatingPdf ? "در حال تولید PDF..." : "دانلود PDF اظهارنامه مالیاتی"}
+                  {generatingPdf ? "در حال تولید PDF..." : "دانلود PDF گزارش آماده‌سازی"}
                 </button>
               </div>
             </div>
@@ -509,18 +475,8 @@ export const ReportsView: React.FC<{
                 <div className="text-xs text-slate-400 font-semibold mb-2">دوره‌های مالیاتی آماده و سریع:</div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {[
-                    { id: "range1404_1405", label: "دوره ۲ ساله (۱۴۰۴ تا ۱۴۰۵)" },
-                    { id: "year1405", label: "سال مالی ۱۴۰۵" },
-                    { id: "year1404", label: "سال مالی ۱۴۰۴" },
-                    { id: "year1403", label: "سال مالی ۱۴۰۳" },
-                    { id: "spring1404", label: "بهار ۱۴۰۴" },
-                    { id: "summer1404", label: "تابستان ۱۴۰۴" },
-                    { id: "autumn1404", label: "پاییز ۱۴۰۴" },
-                    { id: "winter1404", label: "زمستان ۱۴۰۴" },
-                    { id: "spring1405", label: "بهار ۱۴۰۵" },
-                    { id: "summer1405", label: "تابستان ۱۴۰۵" },
-                    { id: "autumn1405", label: "پاییز ۱۴۰۵" },
-                    { id: "winter1405", label: "زمستان ۱۴۰۵" },
+                    ...[currentJalaliYear, currentJalaliYear - 1, currentJalaliYear - 2].map((year) => ({ id: `year${year}`, label: `سال مالی ${year}` })),
+                    ...["spring", "summer", "autumn", "winter"].map((season, index) => ({ id: `${season}${currentJalaliYear}`, label: `${["بهار", "تابستان", "پاییز", "زمستان"][index]} ${currentJalaliYear}` })),
                   ].map((p) => (
                     <button
                       key={p.id}
@@ -542,27 +498,27 @@ export const ReportsView: React.FC<{
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-amber-400 font-bold flex items-center gap-1.5">
                     <Calendar className="h-4 w-4" />
-                    تنظیم بازه تاریخ شمسی دلخواه (مثلاً ۱۴۰۴ تا ۱۴۰۵):
+                    تنظیم بازه تاریخ شمسی دلخواه:
                   </span>
                   <div className="flex items-center gap-1.5 text-[11px]">
                     <span className="text-slate-400">انتخاب سال سریع:</span>
                     <button
-                      onClick={() => handleApplyYearAndQuarter(1404, 1405, "full")}
+                      onClick={() => handleApplyYearAndQuarter(currentJalaliYear - 1, currentJalaliYear, "full")}
                       className="rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-0.5 text-[11px] text-slate-200 border border-slate-700 transition"
                     >
-                      ۱۴۰۴ تا ۱۴۰۵
+                      {currentJalaliYear - 1} تا {currentJalaliYear}
                     </button>
                     <button
-                      onClick={() => handleApplyYearAndQuarter(1404, 1404, "full")}
+                      onClick={() => handleApplyYearAndQuarter(currentJalaliYear - 1, currentJalaliYear - 1, "full")}
                       className="rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-0.5 text-[11px] text-slate-200 border border-slate-700 transition"
                     >
-                      کل ۱۴۰۴
+                      کل {currentJalaliYear - 1}
                     </button>
                     <button
-                      onClick={() => handleApplyYearAndQuarter(1405, 1405, "full")}
+                      onClick={() => handleApplyYearAndQuarter(currentJalaliYear, currentJalaliYear, "full")}
                       className="rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-0.5 text-[11px] text-slate-200 border border-slate-700 transition"
                     >
-                      کل ۱۴۰۵
+                      کل {currentJalaliYear}
                     </button>
                   </div>
                 </div>
@@ -577,7 +533,7 @@ export const ReportsView: React.FC<{
                       dir="ltr"
                       value={taxJalaliStart}
                       onChange={(e) => handleJalaliDateChange("start", e.target.value)}
-                      placeholder="1404/01/01"
+                      placeholder={`${currentJalaliYear}/01/01`}
                       className="w-full rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-xs font-mono font-bold text-amber-300 text-center focus:border-amber-500 focus:outline-none"
                     />
                     <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
@@ -595,7 +551,7 @@ export const ReportsView: React.FC<{
                       dir="ltr"
                       value={taxJalaliEnd}
                       onChange={(e) => handleJalaliDateChange("end", e.target.value)}
-                      placeholder="1405/12/29"
+                      placeholder={`${currentJalaliYear}/12/29`}
                       className="w-full rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-xs font-mono font-bold text-amber-300 text-center focus:border-amber-500 focus:outline-none"
                     />
                     <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
@@ -611,7 +567,7 @@ export const ReportsView: React.FC<{
                       className="w-full rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white shadow-lg shadow-amber-600/20 py-2 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
                       <RefreshCw className={`h-4 w-4 ${taxLoading ? "animate-spin" : ""}`} />
-                      محاسبه و دریافت اظهارنامه
+                      محاسبه و دریافت گزارش آماده‌سازی
                     </button>
                     {taxDateError && (
                       <span className="text-[10px] text-rose-400 mt-1 block text-center font-medium">
@@ -641,27 +597,27 @@ export const ReportsView: React.FC<{
                 className="mx-auto w-[210mm] min-h-[297mm] bg-white text-slate-900 p-8 shadow-2xl rounded-sm text-right font-sans border border-slate-300"
                 style={{ direction: "rtl", color: "#0f172a" }}
               >
-                {/* Official Government Header */}
+                {/* Internal preparation report header; not a government form. */}
                 <div className="border-b-2 border-slate-900 pb-4 mb-5">
                   <div className="flex items-center justify-between">
                     <div className="text-right space-y-1 text-[11px] text-slate-700">
-                      <div>شماره پرونده / پیگیری: <span className="font-mono font-bold text-slate-900">{docTrackingNumber}</span></div>
+                      <div>شناسه داخلی گزارش: <span className="font-mono font-bold text-slate-900">{docTrackingNumber}</span></div>
                       <div>تاریخ تنظیم: <span className="font-bold text-slate-900">{docCreationDate}</span></div>
                       <div>دوره مالیاتی: <span className="font-bold text-slate-900">{taxJalaliStart} الی {taxJalaliEnd}</span></div>
                     </div>
 
                     <div className="text-center space-y-1">
-                      <div className="font-serif text-xs font-bold text-slate-800">جمهوری اسلامی ایران</div>
-                      <div className="text-sm font-black tracking-tight text-slate-950">سازمان امور مالیاتی کشور</div>
+                      <div className="font-serif text-xs font-bold text-slate-800">خروجی داخلی نرم‌افزار</div>
+                      <div className="text-sm font-black tracking-tight text-slate-950">گزارش آماده‌سازی اطلاعات مالیاتی</div>
                       <div className="text-xs font-extrabold bg-slate-100 border border-slate-300 px-3 py-1 rounded">
-                        برگ اظهارنامه مالیات بر عملکرد و ارزش افزوده
+                        غیرقابل ارسال به‌عنوان اظهارنامه رسمی
                       </div>
                     </div>
 
                     <div className="text-left space-y-1 text-[11px] text-slate-700">
                       <div>اداره کل امور مالیاتی:</div>
                       <div className="font-bold text-slate-900">{taxData.taxpayer?.taxOffice || "اداره امور مالیاتی استان"}</div>
-                      <div className="text-[10px] text-slate-500 font-mono">INTA-FORM-110/4</div>
+                      <div className="text-[10px] text-slate-500">ارسال رسمی صرفاً از درگاه سازمان امور مالیاتی</div>
                     </div>
                   </div>
                 </div>
@@ -708,7 +664,7 @@ export const ReportsView: React.FC<{
                 {/* Section 2: Sales & Revenue Table */}
                 <div className="mb-5 border border-slate-800 rounded">
                   <div className="bg-slate-200 px-3 py-1 font-bold text-xs text-slate-900 border-b border-slate-800 flex justify-between">
-                    <span>بخش دوم: جدول محاسبه فروش ناخالص، تخفیفات و درآمد خالص ابرازی</span>
+                    <span>بخش دوم: جدول محاسبه فروش ناخالص، تخفیفات و درآمد خالص ثبت‌شده</span>
                     <span className="text-[11px] font-normal">مبالغ به تومان</span>
                   </div>
                   <table className="w-full text-xs text-right border-collapse">
@@ -745,7 +701,7 @@ export const ReportsView: React.FC<{
                 {/* Section 3: Operating Expenses Breakdown */}
                 <div className="mb-5 border border-slate-800 rounded">
                   <div className="bg-slate-200 px-3 py-1 font-bold text-xs text-slate-900 border-b border-slate-800 flex justify-between">
-                    <span>بخش سوم: جدول هزینه‌های عملیاتی و اداری قابل قبول مالیاتی (ماده ۱۴۷ و ۱۴۸ ق.م.م)</span>
+                    <span>بخش سوم: هزینه‌های ثبت‌شده (تشخیص قابل‌قبول‌بودن نیازمند بررسی اسناد و مقررات است)</span>
                     <span className="text-[11px] font-normal">مبالغ به تومان</span>
                   </div>
                   <table className="w-full text-xs text-right border-collapse">
@@ -772,7 +728,7 @@ export const ReportsView: React.FC<{
                       </tr>
                       <tr className="bg-slate-100 font-bold border-t-2 border-slate-300">
                         <td className="p-2 text-slate-900 bg-slate-200 border-l border-slate-300">جمع</td>
-                        <td className="p-2 text-slate-950">جمع کل هزینه‌های عملیاتی قابل قبول دوره</td>
+                        <td className="p-2 text-slate-950">جمع هزینه‌های ثبت‌شده (پذیرش منوط به بررسی اسناد)</td>
                         <td className="p-2 text-left font-mono text-slate-950">{formatMoney(taxData.statement?.totalAllowableDeductions || 0)}</td>
                       </tr>
                     </tbody>
@@ -782,8 +738,8 @@ export const ReportsView: React.FC<{
                 {/* Section 4: Tax Assessment & Net Profit */}
                 <div className="mb-5 border-2 border-slate-900 rounded overflow-hidden">
                   <div className="bg-slate-900 text-white px-3 py-1.5 font-bold text-xs flex justify-between">
-                    <span>بخش چهارم: محاسبه سود ویژه، مالیات بر عملکرد و مالیات بر ارزش افزوده (VAT)</span>
-                    <span className="text-[11px] font-normal text-slate-300">محاسبات قطعی تشخیصی/ابرازی</span>
+                    <span>بخش چهارم: برآورد سود و خلاصه مالیات ثبت‌شده</span>
+                    <span className="text-[11px] font-normal text-slate-300">برآورد داخلی؛ غیرقطعی</span>
                   </div>
                   <table className="w-full text-xs text-right border-collapse">
                     <tbody>
@@ -803,7 +759,7 @@ export const ReportsView: React.FC<{
                       </tr>
                       <tr className="border-b border-slate-200">
                         <td className="p-2 text-slate-800">
-                          مالیات و عوارض بر ارزش افزوده ابرازی فروش (VAT با نرخ <b className="font-mono">{taxData.statement?.vatRate}%</b>)
+                          مالیات و عوارض ثبت‌شده روی فاکتورها (نرخ تنظیم‌شده <b className="font-mono">{taxData.statement?.vatRate}%</b>)
                         </td>
                         <td className="p-2 text-left font-mono font-bold text-slate-900">
                           {formatMoney(taxData.statement?.calculatedVat || 0)}
@@ -818,15 +774,15 @@ export const ReportsView: React.FC<{
                     </tbody>
                   </table>
                   <div className="bg-slate-50 p-2.5 text-[11px] border-t border-slate-200 text-slate-700">
-                    مبلغ مالیات عملکرد ابرازی به حروف:{" "}
+                    مبلغ برآوردی مالیات عملکرد به حروف:{" "}
                     <b className="text-slate-900 font-bold">{numberToPersianWords(taxData.statement?.corporateTaxAmount || 0, "تومان")}</b>
                   </div>
                 </div>
 
-                {/* Section 5: Signature & Official Seal */}
+                {/* Section 5: Review acknowledgement */}
                 <div className="border border-slate-800 rounded p-4 text-xs space-y-4">
                   <p className="text-justify text-[11px] text-slate-700 leading-relaxed">
-                    اینجانب / صاحبان امضای مجاز شرکت با آگاهی کامل از مقررات و احکام قانونی مواد قانونی مالیات‌های مستقیم و قانون مالیات بر ارزش افزوده، صحت و اصالت تمامی ارقام، فاکتورها، بهای تمام شده و اسناد مندرج در این اظهارنامه را مورد تأیید و تصدیق قطعی قرار می‌دهیم.
+                    این گزارش صرفاً برای آماده‌سازی و کنترل داخلی است. ارقام باید با دفاتر، اسناد مثبته و اطلاعات سامانه مؤدیان تطبیق داده شوند و ارسال قانونی فقط از درگاه رسمی سازمان امور مالیاتی انجام شود.
                   </p>
 
                   <div className="grid grid-cols-2 gap-8 pt-4">
@@ -850,20 +806,20 @@ export const ReportsView: React.FC<{
       {activeTab === "financial" && (
         <div className="space-y-6">
           {/* Quick Tax Declaration Action Card */}
-          <div className="rounded-3xl border-2 border-amber-500/40 bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-slate-900/90 p-6 shadow-2xl space-y-4">
+          {taxOnly && <div className="rounded-3xl border-2 border-amber-500/40 bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-slate-900/90 p-6 shadow-2xl space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
                     <FileSpreadsheet className="h-4 w-4" />
                   </span>
-                  <h3 className="text-base font-bold text-white">مرکز صدور و دانلود اظهارنامه مالیاتی رسمی</h3>
+                  <h3 className="text-base font-bold text-white">گزارش آماده‌سازی اطلاعات مالیاتی</h3>
                   <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30">
                     قانون مالیات‌های مستقیم و VAT
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  تولید و دانلود گزارش رسمی استاندارد مالیاتی شامل درآمد فروش، بهای تمام‌شده، هزینه‌های عملیاتی، مالیات بر درآمد عملکرد (۲۵٪) و ارزش افزوده (۱۰٪).
+                  گزارش داخلی فروش، بهای تمام‌شده، هزینه‌ها و مالیات ثبت‌شده؛ این خروجی جایگزین ارسال در سامانه رسمی نیست.
                 </p>
               </div>
 
@@ -874,7 +830,7 @@ export const ReportsView: React.FC<{
                   className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-amber-600/30 transition cursor-pointer disabled:opacity-50"
                 >
                   <Download className="h-4 w-4" />
-                  {generatingPdf ? "در حال تهیه PDF..." : "دانلود فوری PDF اظهارنامه مالیاتی"}
+                  {generatingPdf ? "در حال تهیه PDF..." : "دانلود PDF گزارش آماده‌سازی"}
                 </button>
                 <button
                   onClick={handlePrintTaxDoc}
@@ -882,7 +838,7 @@ export const ReportsView: React.FC<{
                   className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 px-3.5 py-2.5 text-xs font-bold text-slate-200 transition cursor-pointer disabled:opacity-50"
                 >
                   <Printer className="h-4 w-4 text-slate-400" />
-                  چاپ اظهارنامه
+                  چاپ گزارش
                 </button>
                 <button
                   onClick={() => setActiveTab("tax_declaration")}
@@ -901,20 +857,20 @@ export const ReportsView: React.FC<{
                   <b className="text-white font-mono text-sm mt-0.5 block">{formatMoney(taxData.statement.netSalesRevenue || 0)}</b>
                 </div>
                 <div className="rounded-xl bg-slate-950/60 p-3 border border-slate-800">
-                  <span className="text-slate-400 block text-[11px]">هزینه‌های قابل قبول مالیاتی:</span>
+                  <span className="text-slate-400 block text-[11px]">هزینه‌های ثبت‌شده (نیازمند بررسی):</span>
                   <b className="text-white font-mono text-sm mt-0.5 block">{formatMoney(taxData.statement.totalAllowableDeductions || 0)}</b>
                 </div>
                 <div className="rounded-xl bg-amber-950/30 p-3 border border-amber-800/40">
-                  <span className="text-amber-300 block text-[11px]">مالیات بر عملکرد (۲۵٪):</span>
+                  <span className="text-amber-300 block text-[11px]">برآورد عملکرد با نرخ تنظیم‌شده ({taxData.statement.corporateTaxRate || 0}%):</span>
                   <b className="text-amber-400 font-mono text-sm mt-0.5 block">{formatMoney(taxData.statement.corporateTaxAmount || 0)}</b>
                 </div>
                 <div className="rounded-xl bg-amber-950/30 p-3 border border-amber-800/40">
-                  <span className="text-amber-300 block text-[11px]">مالیات بر ارزش افزوده (VAT ۱۰٪):</span>
+                  <span className="text-amber-300 block text-[11px]">مالیات ثبت‌شده روی فاکتورها:</span>
                   <b className="text-amber-400 font-mono text-sm mt-0.5 block">{formatMoney(taxData.statement.calculatedVat || 0)}</b>
                 </div>
               </div>
             )}
-          </div>
+          </div>}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl space-y-1">
@@ -1253,7 +1209,7 @@ export const ReportsView: React.FC<{
           })()}
         </div>
       )}
+      {!taxOnly && <AdvancedReportsPanel selectedProjectId={selectedProjectId} />}
     </div>
   );
 };
-

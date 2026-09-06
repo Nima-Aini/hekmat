@@ -1,9 +1,9 @@
-import { assertUuid, pageNumber } from "@/lib/apiError";
+import { ApiError, assertUuid, pageNumber } from "@/lib/apiError";
 import { requestIdentity } from "@/lib/idempotency";
 import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { invoices, invoiceItems, customers, projects, employees, payments } from "@/db/schema";
+import { invoices, invoiceItems, customers, projects, employees, payments, accounts } from "@/db/schema";
 import { asc, count, desc, eq, and, ilike, or, sql } from "drizzle-orm";
 import { createInvoice, reverseInvoice } from "@/services/invoice";
 import { getEmployeeContext, requirePermission } from "@/services/access";
@@ -113,6 +113,14 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    assertUuid(String(body.customerId));
+    for (const field of ["projectId", "employeeId", "intermediaryEmployeeId"]) {
+      if (body[field]) assertUuid(String(body[field]));
+    }
+    const invoiceDate = body.invoiceDate ? new Date(body.invoiceDate) : undefined;
+    const dueDate = body.dueDate ? new Date(body.dueDate) : undefined;
+    if (invoiceDate && Number.isNaN(invoiceDate.getTime())) throw new ApiError(400, "تاریخ صدور فاکتور نامعتبر است.");
+    if (dueDate && Number.isNaN(dueDate.getTime())) throw new ApiError(400, "تاریخ سررسید فاکتور نامعتبر است.");
     // Validation: NaN, Infinity, negative
     for (const item of body.items) {
       const isCustom = Boolean(item.isCustom || !item.productId);
@@ -138,9 +146,23 @@ export async function POST(req: Request) {
       const t = Number(body.taxTotal);
       if (!isFinite(t) || t < 0) return NextResponse.json({ success: false, error: "مالیات نامعتبر است." }, { status: 400 });
     }
+    let initialPayment: { amount: number; accountId: string; paymentMethod: string; referenceNumber?: string; paymentDate?: Date } | undefined;
     if (body.initialPayment) {
       const amt = Number(body.initialPayment.amount);
-      if (!isFinite(amt) || amt < 0) return NextResponse.json({ success: false, error: "مبلغ پرداخت نامعتبر است." }, { status: 400 });
+      if (!Number.isFinite(amt) || amt < 0) throw new ApiError(400, "مبلغ پرداخت اولیه نامعتبر است.");
+      if (amt > 0 && !body.initialPayment.accountId) throw new ApiError(400, "انتخاب حساب دریافت برای پرداخت اولیه الزامی است.");
+      if (body.initialPayment.accountId) assertUuid(String(body.initialPayment.accountId));
+      const paymentDate = body.initialPayment.paymentDate ? new Date(body.initialPayment.paymentDate) : undefined;
+      if (paymentDate && Number.isNaN(paymentDate.getTime())) throw new ApiError(400, "تاریخ پرداخت اولیه نامعتبر است.");
+      const allowedMethods = new Set(["cash", "pos", "card_transfer", "cheque", "bank_transfer"]);
+      const paymentMethod = body.initialPayment.paymentMethod || "pos";
+      if (!allowedMethods.has(paymentMethod)) throw new ApiError(400, "روش پرداخت اولیه نامعتبر است.");
+      if (amt > 0) {
+        const [activeAccount] = await db.select({ id: accounts.id }).from(accounts)
+          .where(and(eq(accounts.id, body.initialPayment.accountId), eq(accounts.status, "active"))).limit(1);
+        if (!activeAccount) throw new ApiError(404, "حساب دریافت انتخاب‌شده یافت نشد.");
+      }
+      initialPayment = { amount: amt, accountId: String(body.initialPayment.accountId || ""), paymentMethod, referenceNumber: body.initialPayment.referenceNumber?.trim() || undefined, paymentDate };
     }
     const isManagerOrAdmin = !context || context.permissions.has("*") || context.roleCode === "admin" || context.roleCode === "manager" || context.permissions.has("invoices.manage");
 
@@ -173,12 +195,12 @@ export async function POST(req: Request) {
       salesMode: body.salesMode || "direct",
       employeeId: finalEmployeeId,
       intermediaryEmployeeId: body.intermediaryEmployeeId || null,
-      invoiceDate: body.invoiceDate ? new Date(body.invoiceDate) : undefined,
-      dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+      invoiceDate,
+      dueDate,
       invoiceDiscount: body.invoiceDiscount ? Number(body.invoiceDiscount) : 0,
       taxTotal: body.taxTotal ? Number(body.taxTotal) : 0,
       items: body.items,
-      initialPayment: body.initialPayment,
+      initialPayment,
       notes: body.notes,
       manualInvoiceNumber: body.manualInvoiceNumber,
     });

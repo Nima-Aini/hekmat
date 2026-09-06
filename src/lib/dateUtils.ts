@@ -62,8 +62,8 @@ export function gregorianToJalali(date: Date | string | number): JalaliDate {
  */
 export function jalaliToGregorian(jalali: JalaliDate): Date {
   const { year: jy, month: jm, day: jd } = jalali;
-  if (!jy || !jm || !jd || jy < 1000) {
-    return new Date();
+  if (!jy || !jm || !jd || jy < 1000 || !jalaali.isValidJalaaliDate(jy, jm, jd)) {
+    return new Date(Number.NaN);
   }
   const { gy, gm, gd } = jalaali.toGregorian(jy, jm, jd);
   return new Date(Date.UTC(gy, gm - 1, gd, 0, 0, 0));
@@ -77,7 +77,7 @@ export function parseJalaliString(str: string): Date | null {
   const parts = str.split(/[\/\-]/).map((s) => parseInt(toLatinDigits(s.trim()), 10));
   if (parts.length !== 3 || parts.some(isNaN)) return null;
   const [year, month, day] = parts;
-  if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (year < 1000 || !jalaali.isValidJalaaliDate(year, month, day)) return null;
   return jalaliToGregorian({ year, month, day });
 }
 
@@ -166,22 +166,32 @@ export function toJalaliDate(
  */
 export function getStartOfDayJalali(date?: Date | string | number): Date {
   const d = date ? new Date(date) : new Date();
-  const result = new Date(d);
-  result.setUTCHours(0, 0, 0, 0);
-  // Subtract Iran timezone offset to get UTC start of Tehran day
-  result.setTime(result.getTime() - 3.5 * 60 * 60 * 1000);
-  return result;
+  const tehran = new Date(d.getTime() + 3.5 * 60 * 60 * 1000);
+  return new Date(Date.UTC(tehran.getUTCFullYear(), tehran.getUTCMonth(), tehran.getUTCDate()) - 3.5 * 60 * 60 * 1000);
 }
 
 /**
  * Get end of day in Tehran timezone (UTC+3:30)
  */
 export function getEndOfDayJalali(date?: Date | string | number): Date {
-  const d = date ? new Date(date) : new Date();
-  const result = new Date(d);
-  result.setUTCHours(23, 59, 59, 999);
-  result.setTime(result.getTime() - 3.5 * 60 * 60 * 1000);
-  return result;
+  const start = getStartOfDayJalali(date);
+  return new Date(start.getTime() + 86_400_000 - 1);
+}
+
+export function parseReportDateParam(value: string | null, endOfDay = false): Date | null {
+  if (!value) return null;
+  const normalized = toLatinDigits(value.trim());
+  const jalali = /^1[34]\d{2}[/-]\d{1,2}[/-]\d{1,2}$/.test(normalized) ? parseJalaliString(normalized) : null;
+  let date: Date;
+  if (jalali) date = jalali;
+  else if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const [year, month, day] = normalized.split("-").map(Number);
+    date = new Date(Date.UTC(year, month - 1, day));
+  } else {
+    date = new Date(normalized);
+  }
+  if (Number.isNaN(date.getTime())) return null;
+  return endOfDay ? getEndOfDayJalali(date) : getStartOfDayJalali(date);
 }
 
 /**
@@ -228,7 +238,7 @@ export function getJalaliPresetRange(preset: string): { start: Date; end: Date }
       };
     }
     case "this_week": {
-      const dayOfWeek = today.getDay(); // 0=Sun, 6=Sat
+      const dayOfWeek = (today.getDay() + 1) % 7; // Iranian week starts Saturday
       const startOfWeek = new Date(today);
       startOfWeek.setDate(today.getDate() - dayOfWeek);
       return {
@@ -248,6 +258,14 @@ export function getJalaliPresetRange(preset: string): { start: Date; end: Date }
         start: jalaliToGregorian({ year: now.year, month: quarterMonth, day: 1 }),
         end: getEndOfDayJalali(today),
       };
+    }
+    case "last_3_months":
+    case "last_6_months": {
+      const months = preset === "last_3_months" ? 3 : 6;
+      let year = now.year;
+      let month = now.month - (months - 1);
+      while (month <= 0) { month += 12; year -= 1; }
+      return { start: jalaliToGregorian({ year, month, day: 1 }), end: getEndOfDayJalali(today) };
     }
     case "this_year": {
       return {

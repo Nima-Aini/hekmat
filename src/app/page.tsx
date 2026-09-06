@@ -20,6 +20,10 @@ import { AlertsView } from "@/components/views/AlertsView";
 import { AiAssistantView } from "@/components/views/AiAssistantView";
 import { BackupView } from "@/components/views/BackupView";
 import { SettingsView } from "@/components/views/SettingsView";
+import { OrdersView } from "@/components/views/OrdersView";
+import { NotesView } from "@/components/views/NotesView";
+import { AuditLogsView } from "@/components/views/AuditLogsView";
+import { TaxDeclarationView } from "@/components/views/TaxDeclarationView";
 
 export default function HomePage() {
   const router = useRouter();
@@ -39,6 +43,12 @@ export default function HomePage() {
         return <ProductsView />;
       case "invoices":
         return <InvoicesView selectedProjectId={selectedProjectId} />;
+      case "orders":
+        return <OrdersView selectedProjectId={selectedProjectId} permissions={me?.navigationPermissions || me?.permissions} />;
+      case "notes":
+        return <NotesView selectedProjectId={selectedProjectId} permissions={me?.navigationPermissions || me?.permissions} />;
+      case "audit_logs":
+        return <AuditLogsView selectedProjectId={selectedProjectId} />;
       case "customers":
         return <CustomersView selectedProjectId={selectedProjectId} />;
       case "customer_map":
@@ -58,7 +68,7 @@ export default function HomePage() {
       case "reports":
         return <ReportsView selectedProjectId={selectedProjectId} />;
       case "tax_declaration":
-        return <ReportsView selectedProjectId={selectedProjectId} initialTab="tax_declaration" />;
+        return <TaxDeclarationView selectedProjectId={selectedProjectId} />;
       case "alerts":
         return <AlertsView selectedProjectId={selectedProjectId} onNavigate={setActiveTab} />;
       case "ai":

@@ -39,6 +39,9 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<any | null>(null);
   const [viewingProfile, setViewingProfile] = useState<any | null>(null);
+  const [customer360, setCustomer360] = useState<any | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileInvoicePage, setProfileInvoicePage] = useState(1);
   const [saving, setSaving] = useState(false);
   const getCustomerEmployeeName = (c: any) => {
     if (!c) return "تعیین نشده";
@@ -67,6 +70,16 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
     settlementTermDays: 30,
     notes: "",
   });
+
+  const openCustomerProfile = async (customer: any, invoicePage = 1) => {
+    setViewingProfile(customer);
+    setProfileLoading(true);
+    setProfileInvoicePage(invoicePage);
+    try {
+      const data = await fetch(`/api/customers/${customer.id}/360?invoicePage=${invoicePage}&pageSize=10`).then((response) => response.json());
+      if (data.success) { setCustomer360(data); setViewingProfile(data.customer); }
+    } finally { setProfileLoading(false); }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -97,12 +110,12 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
         setSearchTerm(data.item?.title || data.item?.code || "");
         const found = customers.find((c) => c.id === data.id);
         if (found) {
-          setViewingProfile(found);
+          openCustomerProfile(found);
         } else {
           fetch(`/api/customers/${data.id}`)
             .then((r) => r.json())
             .then((res) => {
-              if (res.success && res.customer) setViewingProfile(res.customer);
+              if (res.success && res.customer) openCustomerProfile(res.customer);
             });
         }
       }
@@ -335,7 +348,7 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
 
               <div className="flex items-center justify-between pt-2 border-t border-slate-800">
                 <button
-                  onClick={() => setViewingProfile(c)}
+                  onClick={() => openCustomerProfile(c)}
                   className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold"
                 >
                   <FileText className="h-3.5 w-3.5" />
@@ -585,13 +598,25 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
                 </div>
               </div>
               <button
-                onClick={() => setViewingProfile(null)}
+                onClick={() => { setViewingProfile(null); setCustomer360(null); }}
                 className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:text-white hover:bg-slate-900 transition flex items-center gap-1 text-xs"
               >
                 <X className="h-4 w-4" />
                 <span>بستن</span>
               </button>
             </div>
+
+            {profileLoading && !customer360 ? <div className="rounded-2xl border border-slate-800 p-8 text-center text-xs text-slate-400"><RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin" />در حال ساخت پرونده ۳۶۰ مشتری…</div> : customer360 && <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/20 p-3"><span className="text-slate-400">کل خرید</span><b className="mt-1 block text-cyan-300">{formatMoney(customer360.summary.totalSales)}</b></div>
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 p-3"><span className="text-slate-400">وصول‌شده</span><b className="mt-1 block text-emerald-300">{formatMoney(customer360.summary.totalPaid)}</b></div>
+                <div className="rounded-2xl border border-rose-500/20 bg-rose-950/20 p-3"><span className="text-slate-400">مانده / سررسیدگذشته</span><b className="mt-1 block text-rose-300">{formatMoney(customer360.summary.outstanding)} / {formatMoney(customer360.summary.overdue)}</b></div>
+                <div className="rounded-2xl border border-purple-500/20 bg-purple-950/20 p-3"><span className="text-slate-400">تعداد / میانگین فاکتور</span><b className="mt-1 block text-purple-300">{customer360.summary.invoiceCount.toLocaleString("fa-IR")} / {formatMoney(customer360.summary.averageInvoice)}</b></div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3 text-xs"><div className="rounded-xl bg-slate-900 p-3">آخرین خرید: <b>{toJalaliDate(customer360.summary.lastPurchase)}</b></div><div className="rounded-xl bg-slate-900 p-3">نرخ وصول: <b className="text-emerald-300">{customer360.summary.collectionRate}%</b></div><div className="rounded-xl bg-slate-900 p-3">تناوب خرید: <b>{customer360.summary.purchaseFrequencyDays ? `هر ${customer360.summary.purchaseFrequencyDays} روز` : "داده کافی نیست"}</b></div></div>
+              <div className="overflow-auto rounded-2xl border border-slate-800"><div className="bg-slate-900 p-3 text-xs font-bold">فاکتورها</div><table className="w-full min-w-[650px] text-xs"><thead className="text-slate-500"><tr><th className="p-2 text-right">شماره</th><th>تاریخ</th><th>کل</th><th>پرداخت</th><th>مانده</th><th>وضعیت</th></tr></thead><tbody>{customer360.invoices.map((invoice: any) => <tr key={invoice.id} className="border-t border-slate-800"><td className="p-2 font-mono text-cyan-300">{invoice.invoiceNumber}</td><td>{toJalaliDate(invoice.invoiceDate)}</td><td>{formatMoney(invoice.grandTotal)}</td><td>{formatMoney(invoice.paidAmount)}</td><td>{formatMoney(invoice.balanceDue)}</td><td>{invoice.paymentStatus}</td></tr>)}</tbody></table><div className="flex justify-center gap-2 p-2"><button disabled={profileInvoicePage <= 1 || profileLoading} onClick={() => openCustomerProfile(viewingProfile, profileInvoicePage - 1)} className="rounded border border-slate-700 px-2 py-1 disabled:opacity-30">قبلی</button><span>{customer360.invoicePagination.page} / {customer360.invoicePagination.totalPages}</span><button disabled={profileInvoicePage >= customer360.invoicePagination.totalPages || profileLoading} onClick={() => openCustomerProfile(viewingProfile, profileInvoicePage + 1)} className="rounded border border-slate-700 px-2 py-1 disabled:opacity-30">بعدی</button></div></div>
+              <div className="grid gap-3 lg:grid-cols-2"><div className="rounded-2xl border border-slate-800 p-3"><h4 className="mb-2 text-xs font-bold">آخرین پرداخت‌ها</h4>{customer360.payments.slice(0, 8).map((payment: any) => <div key={payment.id} className="flex justify-between border-t border-slate-800 py-2 text-[11px]"><span>{toJalaliDate(payment.paymentDate)} · {payment.paymentMethod}</span><b className="text-emerald-300">{formatMoney(payment.amount)}</b></div>)}</div><div className="rounded-2xl border border-slate-800 p-3"><h4 className="mb-2 text-xs font-bold">محصولات پرتکرار</h4>{customer360.favoriteProducts.slice(0, 8).map((product: any) => <div key={product.productName} className="flex justify-between border-t border-slate-800 py-2 text-[11px]"><span>{product.productName}</span><b>{formatNumber(product.quantity)} · {formatMoney(product.revenue)}</b></div>)}</div></div>
+            </>}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
               <div className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
@@ -614,7 +639,7 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
               </div>
               <div className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
                 <span className="text-slate-400 block mb-1">مهلت تسویه:</span>
-                <b className="text-white">{viewingProfile.settlementTermDays || 30} روز</b>
+                <b className="text-white">{viewingProfile.paymentTermsDays || viewingProfile.settlementTermDays || 30} روز</b>
               </div>
               <div className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
                 <span className="text-slate-400 block mb-1">تاریخ عضویت (شمسی):</span>
@@ -641,7 +666,7 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
                 ویرایش مشخصات
               </button>
               <button
-                onClick={() => setViewingProfile(null)}
+                onClick={() => { setViewingProfile(null); setCustomer360(null); }}
                 className="rounded-xl bg-cyan-600 px-5 py-2 text-xs font-bold text-white hover:bg-cyan-500"
               >
                 بستن

@@ -26,6 +26,9 @@ import {
   ChevronDown,
   FileSpreadsheet,
   Sparkles,
+  ClipboardList,
+  StickyNote,
+  ScrollText,
 } from "lucide-react";
 
 interface AppLayoutProps {
@@ -47,6 +50,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 }) => {
   const [projects, setProjects] = useState<any[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [badges, setBadges] = useState<Record<string, number>>({});
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
 
@@ -73,6 +77,13 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       window.removeEventListener("akma:projects-updated", handleUpdate);
       window.removeEventListener("focus", handleUpdate);
     };
+  }, []);
+
+  useEffect(() => {
+    const loadBadges = () => fetch("/api/navigation-badges").then((response) => response.json()).then((data) => data.success && setBadges(data.badges || {})).catch(() => undefined);
+    loadBadges();
+    const timer = window.setInterval(loadBadges, 60_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -113,6 +124,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const navItems = [
     { id: "dashboard", label: "داشبورد مدیریت", icon: LayoutDashboard },
     { id: "invoices", label: "فروش و فاکتورها", icon: ShoppingBag },
+    { id: "orders", label: "سفارشات", icon: ClipboardList },
     { id: "raw_materials", label: "مواد اولیه و قطعات", icon: Package },
     { id: "products", label: "محصولات و BOM", icon: Layers },
     { id: "production", label: "بچ‌های تولید", icon: Factory },
@@ -124,21 +136,23 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
     { id: "employees", label: "همکاران و ویزیتورها", icon: UserCheck },
     { id: "projects", label: "پروژه‌ها و Scope", icon: FolderKanban },
     { id: "reports", label: "مرکز گزارشات و سود", icon: BarChart2 },
-    { id: "tax_declaration", label: "اظهارنامه مالیاتی رسمی", icon: FileSpreadsheet },
+    { id: "tax_declaration", label: "گزارش آماده‌سازی مالیاتی", icon: FileSpreadsheet },
     { id: "alerts", label: "مرکز اعلانات", icon: AlertTriangle },
+    { id: "notes", label: "یادداشت‌ها", icon: StickyNote },
+    { id: "audit_logs", label: "لاگ فعالیت‌ها", icon: ScrollText },
     { id: "ai", label: "مشاور هوش مصنوعی", icon: Bot },
     { id: "backup", label: "پشتیبان‌گیری دیتابیس", icon: Database },
     { id: "settings", label: "تنظیمات سیستم", icon: Settings, permission: "settings.view" },
   ];
 
   const permissionByTab: Record<string, string> = {
-    invoices: "invoices.view", raw_materials: "raw_materials.view", products: "products.view", special_products: "products.view", production: "production.view",
+    invoices: "invoices.view", orders: "orders.view", raw_materials: "raw_materials.view", products: "products.view", special_products: "products.view", production: "production.view",
     inventory: "inventory.view", customers: "customers.view", customer_map: "customers.view", purchases: "purchases.view",
     financial: "financial.view", employees: "employees.view", projects: "projects.view", reports: "reports.view",
     tax_declaration: "reports.view",
-    alerts: "alerts.view", ai: "ai.view", backup: "backup.view", settings: "settings.view",
+    alerts: "alerts.view", notes: "notes.view", audit_logs: "audit.view", ai: "ai.view", backup: "backup.view", settings: "settings.view",
   };
-  const perms = new Set<string>(me?.permissions || []);
+  const perms = new Set<string>(me?.navigationPermissions || me?.permissions || []);
   const canSee = (id: string) => id === "dashboard" || perms.has("*") || perms.has(permissionByTab[id] || "");
   const visibleNavItems = navItems.filter((item) => canSee(item.id));
 
@@ -382,6 +396,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                   >
                     <Icon className={`h-4 w-4 ${isAiAdvisor ? "text-purple-200" : isActive ? "text-white" : "text-slate-400"}`} />
                     <span>{item.label}</span>
+                    {(badges[item.id] || 0) > 0 && <span className="mr-auto min-w-5 rounded-full bg-rose-500 px-1.5 py-0.5 text-center text-[9px] font-black text-white">{badges[item.id] > 99 ? "99+" : badges[item.id].toLocaleString("fa-IR")}</span>}
                     {isAiAdvisor && <Sparkles className="mr-auto h-3.5 w-3.5 text-fuchsia-300 motion-safe:animate-pulse" />}
                   </button>
                 </div>

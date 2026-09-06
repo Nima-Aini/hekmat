@@ -5,7 +5,7 @@ import { requestIdentity } from "@/lib/idempotency";
 import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { payments, accounts, customers, invoices, projects } from "@/db/schema";
+import { payments, paymentAllocations, accounts, customers, invoices, projects } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { recalculateCustomerHealth } from "@/services/customerHealth";
 import { logAuditEvent } from "@/services/audit";
@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     const page = pageNumber(searchParams.get("page"), 1);
     const pageSize = pageNumber(searchParams.get("pageSize"), 20, 100);
     const offset = (page - 1) * pageSize;
-    const list = await db
+    const [list, [totalRow]] = await Promise.all([db
       .select({
         payment: payments,
         accountName: accounts.name,
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
       .leftJoin(projects, eq(payments.projectId, projects.id))
       .orderBy(desc(payments.createdAt))
       .limit(pageSize)
-      .offset(offset);
+      .offset(offset), db.select({ count: sql<number>`count(*)::int` }).from(payments)]);
 
     const formatted = list.map(({ payment, accountName, customerName, invoiceNumber, projectName }) => ({
       ...payment,
@@ -44,7 +44,8 @@ export async function GET(req: Request) {
       amount: Number(payment.amount),
     }));
 
-    return NextResponse.json({ success: true, payments: formatted, pagination: { page, pageSize } });
+    const total = Number(totalRow?.count || 0);
+    return NextResponse.json({ success: true, payments: formatted, pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } });
   } catch (error: any) {
     return apiError(error);
   }
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
         if (!customer || customer.assignedEmployeeId !== context.employeeId) throw new ApiError(403, "دسترسی به این مشتری مجاز نیست.");
       }
       const [acc] = await tx.select().from(accounts).where(eq(accounts.id, body.accountId)).for("update").limit(1);
-      if (!acc) throw new Error("حساب مالی یافت نشد.");
+      if (!acc || acc.status !== "active") throw new ApiError(404, "حساب دریافت انتخاب‌شده یافت نشد.");
 
       const [row] = await tx
         .insert(payments)
@@ -117,6 +118,11 @@ export async function POST(req: Request) {
         .where(eq(accounts.id, body.accountId));
 
       if (body.invoiceId) {
+        await tx.insert(paymentAllocations).values({
+          paymentId: row.id,
+          invoiceId: body.invoiceId,
+          allocatedAmount: amt.toString(),
+        });
         const [inv] = await tx.select().from(invoices).where(eq(invoices.id, body.invoiceId)).limit(1);
         if (inv) {
           const currentPaid = Number(inv.paidAmount) || 0;
@@ -131,11 +137,9 @@ export async function POST(req: Request) {
         }
       }
       if (body.customerId) await recalculateCustomerHealth(body.customerId, tx);
+      await logAuditEvent("CREATE", "payment", row.id, { amount: amt, paymentNumber: payNum, invoiceId: body.invoiceId || null, accountId: body.accountId }, undefined, tx);
       return row;
     });
-
-
-    await logAuditEvent("CREATE", "payment", created.id, { amount: amt, paymentNumber: payNum });
     return NextResponse.json({ success: true, payment: created });
   } catch (error: any) {
     return apiError(error);
