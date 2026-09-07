@@ -37,6 +37,11 @@ export function isJalaliLeapYear(year: number): boolean {
   return jalaali.isLeapJalaaliYear(year);
 }
 
+export function getJalaliMonthLength(year: number, month: number): number {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return 0;
+  return jalaali.jalaaliMonthLength(year, month);
+}
+
 function jalaliDayOfYear(year: number, month: number, day: number): number {
   let doy = day;
   for (let i = 1; i < month; i++) {
@@ -276,7 +281,7 @@ export function getJalaliPresetRange(preset: string): { start: Date; end: Date }
     case "last_month": {
       const lastMonth = now.month === 1 ? 12 : now.month - 1;
       const lastMonthYear = now.month === 1 ? now.year - 1 : now.year;
-      const lastMonthDays = JALALI_MONTHS[lastMonth] || 30;
+      const lastMonthDays = getJalaliMonthLength(lastMonthYear, lastMonth);
       return {
         start: jalaliToGregorian({ year: lastMonthYear, month: lastMonth, day: 1 }),
         end: jalaliToGregorian({ year: lastMonthYear, month: lastMonth, day: lastMonthDays }),

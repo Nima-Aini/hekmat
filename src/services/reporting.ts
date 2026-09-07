@@ -262,32 +262,34 @@ export async function getSalesReport(filter: ReportFilter = {}) {
  * 3. Financial & Profitability Report (Full P&L Waterfall Bridge)
  */
 export async function getFinancialProfitReport(filter: ReportFilter = {}) {
-  const allInvoices = await db.select().from(invoices);
-  const allExpenses = await db.select().from(expenses);
-  const allCommissions = await db.select().from(commissionLedger);
-
-  const scopedInvoices = allInvoices.filter((inv) => {
-    if (inv.status !== "issued") return false;
-    if (filter.projectId && inv.projectId !== filter.projectId) return false;
-    if (filter.excludeProjectIds?.includes(inv.projectId || "")) return false;
-    if (filter.startDate && new Date(inv.invoiceDate) < filter.startDate) return false;
-    if (filter.endDate && new Date(inv.invoiceDate) > filter.endDate) return false;
-    return true;
-  });
-
-  const scopedExpenses = allExpenses.filter((exp) => {
-    if (filter.projectId && exp.projectId !== filter.projectId) return false;
-    if (filter.excludeProjectIds?.includes(exp.projectId || "")) return false;
-    if (filter.startDate && new Date(exp.expenseDate) < filter.startDate) return false;
-    if (filter.endDate && new Date(exp.expenseDate) > filter.endDate) return false;
-    return true;
-  });
-
-  const scopedCommissions = allCommissions.filter((c) => {
-    if (filter.projectId && c.projectId !== filter.projectId) return false;
-    if (filter.excludeProjectIds?.includes(c.projectId || "")) return false;
-    return true;
-  });
+  const invoiceConditions = [eq(invoices.status, "issued")];
+  const expenseConditions = [];
+  const commissionConditions = [];
+  if (filter.projectId) {
+    invoiceConditions.push(eq(invoices.projectId, filter.projectId));
+    expenseConditions.push(eq(expenses.projectId, filter.projectId));
+    commissionConditions.push(eq(commissionLedger.projectId, filter.projectId));
+  }
+  if (filter.excludeProjectIds?.length) {
+    invoiceConditions.push(or(isNull(invoices.projectId), notInArray(invoices.projectId, filter.excludeProjectIds))!);
+    expenseConditions.push(or(isNull(expenses.projectId), notInArray(expenses.projectId, filter.excludeProjectIds))!);
+    commissionConditions.push(or(isNull(commissionLedger.projectId), notInArray(commissionLedger.projectId, filter.excludeProjectIds))!);
+  }
+  if (filter.startDate) {
+    invoiceConditions.push(gte(invoices.invoiceDate, filter.startDate));
+    expenseConditions.push(gte(expenses.expenseDate, filter.startDate));
+    commissionConditions.push(gte(commissionLedger.createdAt, filter.startDate));
+  }
+  if (filter.endDate) {
+    invoiceConditions.push(lte(invoices.invoiceDate, filter.endDate));
+    expenseConditions.push(lte(expenses.expenseDate, filter.endDate));
+    commissionConditions.push(lte(commissionLedger.createdAt, filter.endDate));
+  }
+  const [scopedInvoices, scopedExpenses, scopedCommissions] = await Promise.all([
+    db.select().from(invoices).where(and(...invoiceConditions)),
+    db.select().from(expenses).where(and(...expenseConditions)),
+    db.select().from(commissionLedger).where(and(...commissionConditions)),
+  ]);
 
   let grossRevenue = 0;
   let totalDiscounts = 0;

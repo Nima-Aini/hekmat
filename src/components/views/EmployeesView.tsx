@@ -45,6 +45,7 @@ import {
 import { NeonBadge } from "@/components/ui/NeonBadge";
 import { toJalaliDate, formatMoney, formatNumber } from "@/lib/dateUtils";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
 
 const statusText = (s: string) =>
   ({
@@ -2008,9 +2009,7 @@ export const EmployeesView: React.FC = () => {
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">تاریخ پرداخت:</label>
-                <input type="date" value={payoutForm.paymentDate}
-                  onChange={(e) => setPayoutForm({ ...payoutForm, paymentDate: e.target.value })}
-                  className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2.5 text-white" required />
+                <JalaliDatePicker value={payoutForm.paymentDate || null} onChange={(date) => setPayoutForm({ ...payoutForm, paymentDate: date ? date.toISOString().slice(0, 10) : "" })} required />
               </div>
 
               <div>

@@ -33,6 +33,7 @@ import {
 import { toJalaliDate, formatMoney, formatNumber } from "@/lib/dateUtils";
 import { NeshanMapPicker } from "@/components/maps/NeshanMapPicker";
 import { OrdersView } from "@/components/views/OrdersView";
+import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
 import { NotesView } from "@/components/views/NotesView";
 
 export default function EmployeeDashboardPage() {
@@ -1423,12 +1424,7 @@ export default function EmployeeDashboardPage() {
 
             <div>
               <label className="block text-slate-300 font-semibold mb-1">سررسید فاکتور:</label>
-              <input
-                type="date"
-                value={editInvoice.dueDate || ""}
-                onChange={(e) => setEditInvoice({ ...editInvoice, dueDate: e.target.value })}
-                className="w-full rounded-xl bg-slate-900 border border-slate-800 p-2.5 text-white font-mono"
-              />
+              <JalaliDatePicker value={editInvoice.dueDate || null} onChange={(date) => setEditInvoice({ ...editInvoice, dueDate: date ? date.toISOString().slice(0, 10) : "" })} />
             </div>
 
             <div>

@@ -48,7 +48,7 @@ export default function HomePage() {
       case "notes":
         return <NotesView selectedProjectId={selectedProjectId} permissions={me?.navigationPermissions || me?.permissions} />;
       case "audit_logs":
-        return <AuditLogsView selectedProjectId={selectedProjectId} />;
+        return <AuditLogsView selectedProjectId={selectedProjectId} onNavigate={setActiveTab} />;
       case "customers":
         return <CustomersView selectedProjectId={selectedProjectId} />;
       case "customer_map":
