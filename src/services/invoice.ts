@@ -23,7 +23,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { recordInventoryTransaction } from "./inventory";
 import { resolveProductPrice } from "./pricing";
 import { recalculateCustomerHealth } from "./customerHealth";
-import { logAuditEvent } from "./audit";
+import { AuditContext, logAuditEvent } from "./audit";
 
 export interface CreateInvoiceItemInput {
   productId?: string | null;
@@ -540,7 +540,7 @@ export async function createInvoice(input: CreateInvoiceInput, client?: Transact
 /**
  * Reverse an invoice safely (Audited Reversal)
  */
-export async function reverseInvoice(invoiceId: string, reason: string) {
+export async function reverseInvoice(invoiceId: string, reason: string, auditContext?: AuditContext) {
   return await db.transaction(async (tx) => {
     const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for("update").limit(1);
     if (!inv) throw new Error("فاکتور پیدا نشد");
@@ -630,7 +630,7 @@ export async function reverseInvoice(invoiceId: string, reason: string) {
       .returning();
 
     await recalculateCustomerHealth(inv.customerId, tx);
-    await logAuditEvent("REVERSE", "invoice", invoiceId, { invoiceNumber: inv.invoiceNumber, reason }, undefined, tx);
+    await logAuditEvent("REVERSE", "invoice", invoiceId, { invoiceNumber: inv.invoiceNumber, projectId: inv.projectId, reason, before: { status: inv.status, grandTotal: inv.grandTotal }, after: { status: "reversed", grandTotal: updated.grandTotal } }, auditContext, tx);
 
     return updated;
   });
@@ -652,7 +652,8 @@ export async function updateInvoice(
     invoiceDiscount?: number;
     paymentStatus?: "unpaid" | "partial" | "paid";
     items?: CreateInvoiceItemInput[];
-  }
+  },
+  auditContext?: AuditContext
 ) {
   return await db.transaction(async (tx) => {
     const [existing] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for("update").limit(1);
@@ -1072,7 +1073,10 @@ export async function updateInvoice(
       fields: Object.keys(patch),
       employeeId: patch.employeeId ?? existing.employeeId,
       grandTotal: patch.grandTotal ?? existing.grandTotal,
-    }, undefined, tx);
+      projectId: patch.projectId ?? existing.projectId,
+      before: { invoiceNumber: existing.invoiceNumber, customerId: existing.customerId, employeeId: existing.employeeId, projectId: existing.projectId, grandTotal: existing.grandTotal, status: existing.status },
+      after: { invoiceNumber: updated.invoiceNumber, customerId: updated.customerId, employeeId: updated.employeeId, projectId: updated.projectId, grandTotal: updated.grandTotal, status: updated.status },
+    }, auditContext, tx);
 
     return updated;
   });

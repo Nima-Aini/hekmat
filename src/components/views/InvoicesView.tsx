@@ -75,6 +75,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
   const [downloadingJpg, setDownloadingJpg] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<any | null>(null);
   const [editingFullInvoice, setEditingFullInvoice] = useState<any | null>(null);
+  const [editAuditParentLogId, setEditAuditParentLogId] = useState<string | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<any | null>(null);
   const [editForm, setEditForm] = useState({
     id: "",
@@ -447,12 +448,13 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
   };
 
   // Full Edit Modal Handlers
-  const openEditFullInvoice = async (inv: any) => {
+  const openEditFullInvoice = async (inv: any, auditParentLogId?: string) => {
     const res = await fetch(`/api/invoices/${inv.id}`).then((r) => r.json());
     if (!res.success) return alert(res.error || "خطا در دریافت اطلاعات فاکتور");
 
     const list = getFilteredProducts();
     setEditingFullInvoice(res);
+    setEditAuditParentLogId(auditParentLogId || null);
     setEditForm({
       id: res.invoice.id,
       invoiceNumber: res.invoice.invoiceNumber || "",
@@ -553,11 +555,13 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
             discountAmount: it.discountAmount || 0,
           })),
           notes: editForm.notes,
+          auditParentLogId: editAuditParentLogId || undefined,
         }),
       }).then((r) => r.json());
 
       if (res.success) {
         setEditingFullInvoice(null);
+        setEditAuditParentLogId(null);
         await fetchData();
       } else {
         alert(res.error || "خطا در ویرایش فاکتور");
@@ -646,11 +650,16 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
 
   useEffect(() => {
     const handleNavigation = (event: Event) => {
-      const detail = (event as CustomEvent<{ type?: string; id?: string }>).detail;
-      if (detail?.type === "invoice" && detail.id) openViewInvoice({ id: detail.id });
+      const detail = (event as CustomEvent<{ type?: string; id?: string; mode?: "view" | "edit"; auditParentLogId?: string }>).detail;
+      if (detail?.type === "invoice" && detail.id) {
+        if (detail.mode === "edit") void openEditFullInvoice({ id: detail.id }, detail.auditParentLogId);
+        else void openViewInvoice({ id: detail.id });
+      }
     };
     window.addEventListener("akma:navigate-item", handleNavigation);
     return () => window.removeEventListener("akma:navigate-item", handleNavigation);
+    // This cross-view event intentionally binds the current invoice loaders once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addInvoicePayment = async () => {

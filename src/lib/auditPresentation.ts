@@ -1,7 +1,7 @@
 import { formatMoney, formatNumber, toJalaliDate } from "@/lib/dateUtils";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
-  CREATE: "ایجاد شد", UPDATE: "ویرایش شد", DELETE: "حذف شد", ARCHIVE: "بایگانی شد", REVERSE: "سند معکوس شد",
+  CREATE: "ایجاد شد", UPDATE: "ویرایش شد", DELETE: "حذف شد", ARCHIVE: "بایگانی شد", REVERSE: "ابطال شد",
   LOGIN: "ورود به سامانه", TRANSFER: "انتقال مسئولیت", INVENTORY_TRANSACTION: "تراکنش موجودی",
   ORDER_CREATE: "ایجاد شد", ORDER_CANCEL: "لغو شد", ORDER_CONVERT: "به فاکتور تبدیل شد",
   NOTE_CREATE: "ایجاد شد", NOTE_UPDATE: "ویرایش شد", NOTE_COMPLETE: "تکمیل شد",
@@ -28,6 +28,7 @@ const FIELD_LABELS: Record<string, string> = {
   dueDate: "سررسید", deliveryDate: "تاریخ تحویل", paymentDate: "تاریخ پرداخت", periodStart: "شروع دوره", periodEnd: "پایان دوره",
   mobile: "موبایل", creditLimit: "سقف اعتبار", commissionRate: "نرخ پورسانت", rateValue: "مقدار نرخ", username: "نام کاربری",
   before: "مقدار قبلی", after: "مقدار جدید", projectSalary: "حقوق پروژه", notes: "توضیحات", description: "شرح",
+  source: "منبع اقدام", fields: "فیلدهای تغییرکرده",
 };
 
 const MONEY_KEY = /(amount|price|cost|total|salary|credit|paid|payable|revenue|profit)/i;
@@ -36,6 +37,7 @@ const VALUE_LABELS: Record<string, string> = {
   open: "باز", ready: "آماده", issued: "صادرشده", paid: "تسویه‌شده", unpaid: "تسویه‌نشده", partial: "پرداخت ناقص",
   active: "فعال", inactive: "غیرفعال", archived: "بایگانی‌شده", cancelled: "لغوشده", completed: "تکمیل‌شده",
   pending: "در انتظار", reversed: "معکوس‌شده", green: "سالم", yellow: "نیازمند توجه", red: "بحرانی",
+  audit_log: "بخش تاریخچه فعالیت‌ها",
 };
 
 export function auditActionLabel(action?: string | null) {

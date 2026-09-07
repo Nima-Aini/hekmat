@@ -24,6 +24,7 @@ import { OrdersView } from "@/components/views/OrdersView";
 import { NotesView } from "@/components/views/NotesView";
 import { AuditLogsView } from "@/components/views/AuditLogsView";
 import { TaxDeclarationView } from "@/components/views/TaxDeclarationView";
+import { canManageAuditActions } from "@/lib/auditAuthorization";
 
 export default function HomePage() {
   const router = useRouter();
@@ -48,7 +49,7 @@ export default function HomePage() {
       case "notes":
         return <NotesView selectedProjectId={selectedProjectId} permissions={me?.navigationPermissions || me?.permissions} />;
       case "audit_logs":
-        return <AuditLogsView selectedProjectId={selectedProjectId} onNavigate={setActiveTab} />;
+        return <AuditLogsView selectedProjectId={selectedProjectId} onNavigate={setActiveTab} isAdmin={canManageAuditActions({ roleCode: me?.role?.code, permissions: me?.permissions })} />;
       case "customers":
         return <CustomersView selectedProjectId={selectedProjectId} />;
       case "customer_map":

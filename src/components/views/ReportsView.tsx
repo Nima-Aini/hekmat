@@ -51,15 +51,17 @@ import { triggerTaxDeclarationPrint } from "@/lib/taxPrintHelper";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { AdvancedReportsPanel } from "@/components/views/AdvancedReportsPanel";
+import { AnalyticsTab, ReportsAnalyticsOverview } from "@/components/views/ReportsAnalyticsOverview";
 import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
+import { shouldShowAdvancedReports } from "@/lib/reportPresentation";
 
 export const ReportsView: React.FC<{
   selectedProjectId: string | null;
-  initialTab?: "financial" | "tax_declaration" | "sales" | "inflation" | "comparison";
+  initialTab?: AnalyticsTab;
   taxOnly?: boolean;
-}> = ({ selectedProjectId, initialTab = "financial", taxOnly = false }) => {
+}> = ({ selectedProjectId, initialTab = "summary", taxOnly = false }) => {
   const initialReportRange = getJalaliPresetRange("this_month")!;
-  const [activeTab, setActiveTab] = useState<"financial" | "tax_declaration" | "sales" | "inflation" | "comparison">(initialTab);
+  const [activeTab, setActiveTab] = useState<AnalyticsTab>(initialTab);
 
   useEffect(() => {
     if (initialTab) {
@@ -70,6 +72,7 @@ export const ReportsView: React.FC<{
   const [salesData, setSalesData] = useState<any>(null);
   const [projects, setProjects] = useState<any[]>([]);
   const [comparisonData, setComparisonData] = useState<any>(null);
+  const [analyticsData, setAnalyticsData] = useState<any>({ dashboard: null, products: [], customers: [], projects: [], expenses: null, commissions: [], inventory: null });
   const [loading, setLoading] = useState(true);
   const [reportError, setReportError] = useState("");
   const [reportPreset, setReportPreset] = useState("this_month");
@@ -130,16 +133,32 @@ export const ReportsView: React.FC<{
     try {
       const projParam = selectedProjectId ? `&projectId=${selectedProjectId}` : "";
       const dateParam = `&startDate=${reportStartDate}&endDate=${reportEndDate}`;
-      const [finRes, salesRes, projRes, rmRes] = await Promise.all([
+      const [finRes, salesRes, projRes, rmRes, dashboardRes, productsRes, customersRes, projectsRes, expensesRes, commissionsRes, inventoryRes] = await Promise.all([
         fetch(`/api/reports?type=financial${projParam}${dateParam}`).then((r) => r.json()),
         fetch(`/api/reports?type=sales${projParam}${dateParam}`).then((r) => r.json()),
         fetch("/api/projects").then((r) => r.json()),
         fetch("/api/raw-materials").then((r) => r.json()),
+        fetch(`/api/reports?type=dashboard${projParam}${dateParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=products_center${projParam}${dateParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=customers_center${projParam}${dateParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=projects_center${projParam}${dateParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=expenses_center${projParam}${dateParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=commissions_center${projParam}${dateParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=inventory${projParam}${dateParam}`).then((r) => r.json()),
       ]);
 
       if (!finRes.success || !salesRes.success) throw new Error(finRes.error || salesRes.error || "دریافت گزارش انجام نشد.");
       setFinancialData(finRes.data);
       setSalesData(salesRes.data);
+      setAnalyticsData({
+        dashboard: dashboardRes.success ? dashboardRes.data : null,
+        products: productsRes.success ? productsRes.data || [] : [],
+        customers: customersRes.success ? customersRes.data || [] : [],
+        projects: projectsRes.success ? projectsRes.data || [] : [],
+        expenses: expensesRes.success ? expensesRes.data : null,
+        commissions: commissionsRes.success ? commissionsRes.data || [] : [],
+        inventory: inventoryRes.success ? inventoryRes.data : null,
+      });
       if (projRes.success) {
         setProjects(projRes.projects || []);
         if (projRes.projects.length >= 2) {
@@ -414,53 +433,21 @@ export const ReportsView: React.FC<{
 
   return (
     <div className="space-y-6">
-      {/* Header & Tabs */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Premium analytics header inspired by the supplied visual reference. */}
+      <header className="overflow-hidden rounded-3xl border border-slate-800 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,0.96))] p-4 shadow-2xl shadow-black/20 sm:p-6">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <h2 className="flex items-center gap-2 text-xl font-black text-white sm:text-2xl">
             <BarChart2 className="h-6 w-6 text-purple-400" />
-            {taxOnly ? "گزارش آماده‌سازی اظهارنامه مالیاتی" : "مرکز گزارشات مدیریتی و سود و زیان (P&L)"}
+            {taxOnly ? "گزارش آماده‌سازی اظهارنامه مالیاتی" : "گزارشات و تحلیل"}
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            {taxOnly ? "خروجی کمکی برای کنترل و آماده‌سازی؛ ارسال رسمی فقط از مسیر سامانه‌های سازمان امور مالیاتی انجام می‌شود." : "داده‌های عملیاتی یکپارچه از فروش، وصول، انبارداری و حساب‌ها"}
+          <p className="mt-1 text-xs leading-5 text-slate-400">
+            {taxOnly ? "خروجی کمکی برای کنترل و آماده‌سازی؛ ارسال رسمی فقط از مسیر سامانه‌های سازمان امور مالیاتی انجام می‌شود." : "نمای جامع عملکرد فروش، سود، مشتریان، پروژه‌ها و عملیات"}
           </p>
         </div>
-
-        {!taxOnly && <div className="flex flex-wrap items-center gap-1.5 rounded-2xl bg-slate-900 p-1.5 border border-slate-800 text-xs font-semibold">
-          <button
-            onClick={() => setActiveTab("financial")}
-            className={`rounded-xl px-3.5 py-2 transition ${
-              activeTab === "financial" ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" : "text-slate-400 hover:text-white"
-            }`}
-          >
-            سود و زیان (P&L)
-          </button>
-          <button
-            onClick={() => setActiveTab("sales")}
-            className={`rounded-xl px-3.5 py-2 transition ${
-              activeTab === "sales" ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" : "text-slate-400 hover:text-white"
-            }`}
-          >
-            فروش و همکاران
-          </button>
-          <button
-            onClick={() => setActiveTab("inflation")}
-            className={`rounded-xl px-3.5 py-2 transition ${
-              activeTab === "inflation" ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" : "text-slate-400 hover:text-white"
-            }`}
-          >
-            شبیه‌ساز تورم
-          </button>
-          <button
-            onClick={() => setActiveTab("comparison")}
-            className={`rounded-xl px-3.5 py-2 transition ${
-              activeTab === "comparison" ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" : "text-slate-400 hover:text-white"
-            }`}
-          >
-            مقایسه پروژه‌ها
-          </button>
-        </div>}
-      </div>
+        {!taxOnly && <nav aria-label="دسته‌بندی گزارش‌ها" className="mt-5 overflow-x-auto pb-1"><div className="flex min-w-max items-center gap-1.5 rounded-2xl border border-slate-800 bg-slate-950/65 p-1.5 text-xs font-semibold">{([
+          ["summary", "خلاصه"], ["sales", "فروش"], ["financial", "سود و زیان"], ["customers", "مشتریان"], ["products", "محصولات"], ["projects", "پروژه‌ها"], ["inventory", "انبار"], ["employees", "کارکنان / ویزیتورها"], ["comparison", "مقایسه"], ["inflation", "شبیه‌ساز تورم"],
+        ] as Array<[AnalyticsTab, string]>).map(([tab, label]) => <button key={tab} onClick={() => setActiveTab(tab)} className={`whitespace-nowrap rounded-xl px-3.5 py-2.5 transition ${activeTab === tab ? "bg-gradient-to-l from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-950/50" : "text-slate-400 hover:bg-slate-900 hover:text-white"}`}>{label}</button>)}</div></nav>}
+      </header>
 
       {!taxOnly && activeTab !== "tax_declaration" && <section className="grid min-w-0 gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_auto] xl:items-end">
         <label className="text-xs text-slate-400">بازه گزارش<select value={reportPreset} onChange={(event) => applyReportPreset(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-base text-white sm:text-sm"><option value="today">امروز</option><option value="this_week">این هفته</option><option value="this_month">این ماه</option><option value="last_3_months">سه ماه اخیر</option><option value="last_6_months">شش ماه اخیر</option><option value="this_year">سال جاری شمسی</option><option value="custom">بازه دلخواه</option></select></label>
@@ -469,6 +456,8 @@ export const ReportsView: React.FC<{
         <button onClick={fetchData} disabled={loading || !reportStartDate || !reportEndDate} className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-xs text-slate-200 disabled:opacity-40"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />به‌روزرسانی</button>
         {reportError && <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300 sm:col-span-2 xl:col-span-4">{reportError}</div>}
       </section>}
+
+      {!taxOnly && <ReportsAnalyticsOverview activeTab={activeTab} financialData={financialData} salesData={salesData} dashboardData={analyticsData.dashboard} products={analyticsData.products} customers={analyticsData.customers} projects={analyticsData.projects} expenses={analyticsData.expenses} commissions={analyticsData.commissions} inventory={analyticsData.inventory} />}
 
       {/* Tab: Tax Declaration (اظهارنامه مالیاتی رسمی) */}
       {activeTab === "tax_declaration" && (
@@ -1209,7 +1198,7 @@ export const ReportsView: React.FC<{
           })()}
         </div>
       )}
-      {!taxOnly && <AdvancedReportsPanel selectedProjectId={selectedProjectId} />}
+      {shouldShowAdvancedReports(activeTab, taxOnly) && <AdvancedReportsPanel selectedProjectId={selectedProjectId} />}
     </div>
   );
 };

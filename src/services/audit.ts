@@ -8,6 +8,8 @@ export interface AuditContext {
   userId?: string;
   userName?: string;
   ipAddress?: string;
+  parentLogId?: string;
+  source?: string;
 }
 
 const SENSITIVE_KEY = /(password|passwordhash|token|cookie|api[_-]?key|session|secret|authorization)/i;
@@ -38,11 +40,13 @@ export async function logAuditEvent(
       entityType,
       entityId: validEntityId,
       projectId: typeof finalDetails.projectId === "string" && UUID_REGEX.test(finalDetails.projectId) ? finalDetails.projectId : null,
+      parentLogId: context?.parentLogId && UUID_REGEX.test(context.parentLogId) ? context.parentLogId : null,
       userId: context?.userId || "system_user",
       userName: context?.userName || "کاربر سیستم",
       details: {
         ...finalDetails,
         ...(context?.ipAddress ? { ipAddress: context.ipAddress } : {}),
+        ...(context?.source ? { source: context.source } : {}),
       },
     });
   } catch (err) {

@@ -5,8 +5,9 @@ import { employeeAccounts, employees, employeeProjectAssignments, roles } from "
 import { eq, and } from "drizzle-orm";
 import { verifySession } from "@/services/employeeAuth";
 import { employeePermissionSet } from "@/services/partner";
+import { canManageAuditActions } from "@/lib/auditAuthorization";
 
-export type EmployeeContext = { employeeId: string; permissions: Set<string>; roleCode?: string };
+export type EmployeeContext = { employeeId: string; employeeName: string; permissions: Set<string>; roleCode?: string };
 
 export async function getEmployeeContext(): Promise<EmployeeContext | null> {
   try {
@@ -21,6 +22,7 @@ export async function getEmployeeContext(): Promise<EmployeeContext | null> {
         roleId: employeeAccounts.roleId,
         employeeStatus: employees.status,
         offboardingStage: employees.offboardingStage,
+        employeeName: employees.name,
       })
       .from(employeeAccounts)
       .innerJoin(employees, eq(employeeAccounts.employeeId, employees.id))
@@ -33,11 +35,22 @@ export async function getEmployeeContext(): Promise<EmployeeContext | null> {
       ? (await db.select({ code: roles.code }).from(roles).where(eq(roles.id, row.roleId)).limit(1))[0]
       : null;
     const permissions = new Set((await employeePermissionSet(employeeId)).map((p) => p.code));
-    return { employeeId, permissions, roleCode: role?.code };
+    return { employeeId, employeeName: row.employeeName, permissions, roleCode: role?.code };
   } catch (err) {
     console.error("getEmployeeContext error:", err);
     return null;
   }
+}
+
+export function isAuditManager(context: Pick<EmployeeContext, "permissions" | "roleCode">) {
+  return canManageAuditActions(context);
+}
+
+export async function requireAuditManager() {
+  const context = await getEmployeeContext();
+  if (!context) throw new ApiError(401, "ابتدا وارد حساب کاربری شوید.");
+  if (!isAuditManager(context)) throw new ApiError(403, "مدیریت عملیات از تاریخچه فقط برای مدیر سیستم مجاز است.");
+  return context;
 }
 
 export async function getScopedProjectIds() {

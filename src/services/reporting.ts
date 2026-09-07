@@ -103,7 +103,7 @@ export async function getDashboardKPIs(filter: ReportFilter = {}) {
   const notDueReceivable = Math.max(0, totalReceivable - overdueReceivable);
   const lowRawMaterials = allRawMaterials.filter((item) => item.status === "active" && Number(item.stockQuantity) <= Number(item.minStockQuantity));
   const criticalRawMaterials = lowRawMaterials.filter((item) => Number(item.stockQuantity) <= 0);
-  const topShortages = lowRawMaterials.map((item) => ({ id: item.id, name: item.name, stock: Number(item.stockQuantity), minimum: Number(item.minStockQuantity), shortage: Math.max(0, Number(item.minStockQuantity) - Number(item.stockQuantity)) })).sort((a, b) => b.shortage - a.shortage).slice(0, 5);
+  const topShortages = lowRawMaterials.map((item) => ({ id: item.id, name: item.name, unit: item.unit, stock: Number(item.stockQuantity), minimum: Number(item.minStockQuantity), shortage: Math.max(0, Number(item.minStockQuantity) - Number(item.stockQuantity)) })).sort((a, b) => b.shortage - a.shortage).slice(0, 5);
   let salesChangePercent: number | null = null;
   if (filter.startDate && filter.endDate) {
     const duration = filter.endDate.getTime() - filter.startDate.getTime() + 1;
@@ -137,6 +137,7 @@ export async function getDashboardKPIs(filter: ReportFilter = {}) {
     collectionRate: totalSales > 0 ? Math.round((totalPaid / totalSales) * 1000) / 10 : 0,
     lowRawMaterialCount: lowRawMaterials.length,
     criticalRawMaterialCount: criticalRawMaterials.length,
+    rawMaterialCount: allRawMaterials.length,
     rawMaterialInventoryValue: allRawMaterials.reduce((sum, item) => sum + Number(item.stockQuantity || 0) * Number(item.averageCost || item.currentCost || 0), 0),
     topShortages,
     customerCount: allCustomers.length,

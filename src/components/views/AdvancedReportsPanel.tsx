@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BarChart3, Download, RefreshCw } from "lucide-react";
 import { formatMoney, formatNumber, gregorianToJalali, isJalaliLeapYear, jalaliToGregorian } from "@/lib/dateUtils";
 import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 type ReportType = "expenses_center" | "products_center" | "customers_center" | "projects_center" | "commissions_center" | "inventory" | "period_comparison";
 
@@ -71,7 +72,30 @@ export function AdvancedReportsPanel({ selectedProjectId }: { selectedProjectId:
 
   useEffect(() => { void load(); }, [load]);
 
-  const rows: any[] = Array.isArray(data) ? data : data?.categories || data?.rawMaterials || [];
+  const rows: any[] = useMemo(() => Array.isArray(data) ? data : data?.categories || data?.rawMaterials || [], [data]);
+  const visual = useMemo(() => {
+    if (type === "period_comparison") return { key: "value", label: "فروش دو دوره", rows: data ? [{ name: "دوره اصلی", value: Number(data.periodA?.totalSales || 0) }, { name: "دوره مقایسه", value: Number(data.periodB?.totalSales || 0) }] : [] };
+    const config: Record<Exclude<ReportType, "period_comparison">, { name: string; value: string; label: string }> = {
+      expenses_center: { name: "category", value: "total", label: "توزیع هزینه‌ها" },
+      products_center: { name: "productName", value: "revenue", label: "محصولات بر اساس درآمد" },
+      customers_center: { name: "storeName", value: "totalSales", label: "مشتریان بر اساس فروش" },
+      projects_center: { name: "projectName", value: "sales", label: "پروژه‌ها بر اساس فروش" },
+      commissions_center: { name: "employeeName", value: "earned", label: "پورسانت کارکنان" },
+      inventory: { name: "name", value: "totalValue", label: "ارزش مواد اولیه" },
+    };
+    const current = config[type];
+    return { key: "value", label: current.label, rows: rows.slice(0, 8).map((row) => ({ name: row[current.name] || row.customerName || "سایر", value: Number(row[current.value] || 0) })) };
+  }, [data, rows, type]);
+  const summaryCards = useMemo(() => {
+    const sum = (key: string) => rows.reduce((total, row) => total + Number(row[key] || 0), 0);
+    if (type === "expenses_center") return [{ title: "کل هزینه دوره", value: Number(data?.totalExpense || 0) }, { title: "دسته هزینه", value: rows.length, money: false }, { title: "بزرگ‌ترین هزینه", value: Math.max(0, ...rows.map((row) => Number(row.largest || 0))) }];
+    if (type === "products_center") return [{ title: "درآمد محصولات", value: sum("revenue") }, { title: "سود ناخالص", value: sum("grossProfit") }, { title: "تعداد محصول", value: rows.length, money: false }];
+    if (type === "customers_center") return [{ title: "فروش مشتریان", value: sum("totalSales") }, { title: "وصول", value: sum("collected") }, { title: "مطالبات", value: sum("outstanding") }];
+    if (type === "projects_center") return [{ title: "فروش پروژه‌ها", value: sum("sales") }, { title: "سود پروژه‌ها", value: sum("profit") }, { title: "مطالبات", value: sum("receivables") }];
+    if (type === "commissions_center") return [{ title: "پورسانت کل", value: sum("earned") }, { title: "پرداخت‌شده", value: sum("paid") }, { title: "باقی‌مانده", value: sum("unpaid") }];
+    if (type === "inventory") return [{ title: "ارزش مواد اولیه", value: Number(data?.totalRawMaterialValue || 0) }, { title: "مواد زیر حداقل", value: rows.filter((row) => row.isLow).length, money: false }, { title: "تعداد مواد", value: rows.length, money: false }];
+    return [{ title: "فروش دوره اصلی", value: Number(data?.periodA?.totalSales || 0) }, { title: "فروش دوره مقایسه", value: Number(data?.periodB?.totalSales || 0) }, { title: "تغییر فروش (درصد)", value: Number(data?.changes?.totalSales || 0), money: false }];
+  }, [data, rows, type]);
   const downloadCsv = () => {
     const exportRows = type === "period_comparison" && data ? [{ period: "دوره اصلی", ...(data.periodA || {}) }, { period: "دوره مقایسه", ...(data.periodB || {}) }] : rows;
     if (!exportRows.length) return;
@@ -94,13 +118,13 @@ export function AdvancedReportsPanel({ selectedProjectId }: { selectedProjectId:
     </div>
     {error && <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300">{error}</div>}
     {loading && !data ? <div className="p-10 text-center text-sm text-slate-400"><RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin" />در حال محاسبه گزارش…</div> : null}
-    {type === "expenses_center" && data && <><div className="grid sm:grid-cols-3"><NumberCard title="کل هزینه دوره" value={data.totalExpense} /></div><ReportTable headers={["دسته", "جمع", "تعداد", "بزرگ‌ترین"]} rows={rows.map((row) => [row.category || "سایر", formatMoney(row.total), row.count, formatMoney(row.largest)])} /></>}
+    {data && <><div className="grid gap-3 sm:grid-cols-3">{summaryCards.map((card) => <NumberCard key={card.title} title={card.title} value={card.value} money={card.money !== false} />)}</div><div className="grid gap-4 lg:grid-cols-[1.7fr_1fr]"><div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4"><h3 className="mb-4 text-sm font-bold text-white">{visual.label}</h3><div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={visual.rows}><CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} /><XAxis dataKey="name" stroke="#94a3b8" fontSize={10} /><YAxis stroke="#94a3b8" fontSize={10} /><Tooltip contentStyle={{ background: "#07111f", border: "1px solid #334155", borderRadius: 12 }} formatter={(value) => formatMoney(Number(value || 0))} /><Bar dataKey={visual.key} fill="#06b6d4" radius={[7, 7, 0, 0]} /></BarChart></ResponsiveContainer></div></div><div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4"><h3 className="text-sm font-bold text-white">جمع‌بندی</h3>{visual.rows.length ? <div className="mt-4 space-y-2">{visual.rows.slice(0, 5).map((row, index) => <div key={`${row.name}-${index}`} className="flex items-center justify-between gap-3 rounded-xl bg-slate-900/70 p-3 text-xs"><span className="min-w-0 truncate text-slate-300">{index + 1}. {row.name}</span><strong className="shrink-0 text-cyan-300">{formatMoney(row.value)}</strong></div>)}</div> : <p className="py-10 text-center text-xs text-slate-500">داده‌ای برای تحلیل وجود ندارد.</p>}</div></div></>}
+    {type === "expenses_center" && data && <ReportTable headers={["دسته", "جمع", "تعداد", "بزرگ‌ترین"]} rows={rows.map((row) => [row.category || "سایر", formatMoney(row.total), row.count, formatMoney(row.largest)])} />}
     {type === "products_center" && <ReportTable headers={["محصول", "تعداد فروش", "درآمد", "سود", "حاشیه", "فاکتور"]} rows={rows.map((row) => [row.productName, row.quantitySold, formatMoney(row.revenue), formatMoney(row.grossProfit), `${row.margin}%`, row.invoiceCount])} />}
     {type === "customers_center" && <ReportTable headers={["مشتری/فروشگاه", "فروش", "وصول", "مانده", "سررسید گذشته", "فاکتور"]} rows={rows.map((row) => [row.storeName || row.customerName, formatMoney(row.totalSales), formatMoney(row.collected), formatMoney(row.outstanding), formatMoney(row.overdue), row.invoiceCount])} />}
     {type === "projects_center" && <ReportTable headers={["پروژه", "فروش", "وصول", "مطالبات", "سود", "فاکتور"]} rows={rows.map((row) => [row.projectName, formatMoney(row.sales), formatMoney(row.collected), formatMoney(row.receivables), formatMoney(row.profit), row.invoiceCount])} />}
     {type === "commissions_center" && <ReportTable headers={["همکار", "پورسانت کل", "قابل پرداخت", "پرداخت‌شده", "باقی‌مانده"]} rows={rows.map((row) => [row.employeeName, formatMoney(row.earned), formatMoney(row.payable), formatMoney(row.paid), formatMoney(row.unpaid)])} />}
-    {type === "inventory" && data && <><div className="grid gap-3 sm:grid-cols-2"><NumberCard title="ارزش مواد اولیه" value={data.totalRawMaterialValue} /><NumberCard title="تعداد اقلام کم‌موجودی" value={rows.filter((row) => row.isLow).length} money={false} /></div><ReportTable headers={["ماده اولیه", "موجودی", "حداقل", "بهای میانگین", "ارزش", "وضعیت"]} rows={rows.map((row) => [row.name, `${row.stockQuantity} ${row.unit || ""}`, row.minStockQuantity, formatMoney(row.averageCost), formatMoney(row.totalValue), row.isLow ? "نیازمند تأمین" : "عادی"])} /></>}
-    {type === "period_comparison" && data && <div className="grid gap-3 md:grid-cols-3"><NumberCard title="فروش دوره اصلی" value={data.periodA?.totalSales} /><NumberCard title="فروش دوره مقایسه" value={data.periodB?.totalSales} /><NumberCard title="تغییر فروش (درصد)" value={data.changes?.totalSales} /></div>}
+    {type === "inventory" && data && <ReportTable headers={["ماده اولیه", "موجودی", "حداقل", "بهای میانگین", "ارزش", "وضعیت"]} rows={rows.map((row) => [row.name, `${row.stockQuantity} ${row.unit || ""}`, row.minStockQuantity, formatMoney(row.averageCost), formatMoney(row.totalValue), row.isLow ? "نیازمند تأمین" : "عادی"])} />}
   </section>;
 }
 

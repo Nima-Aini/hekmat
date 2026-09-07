@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { auditLogs } from "@/db/schema";
@@ -31,6 +31,16 @@ export async function GET(req: Request) {
       db.select({ total: count() }).from(auditLogs).where(where),
     ]);
     const total = Number(totalRow?.total || 0);
-    return NextResponse.json({ success: true, logs, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } });
+    const logIds = logs.map((log) => log.id);
+    const parentIds = logs.map((log) => log.parentLogId).filter((id): id is string => Boolean(id));
+    const related = logIds.length
+      ? await db.select().from(auditLogs).where(or(inArray(auditLogs.parentLogId, logIds), ...(parentIds.length ? [inArray(auditLogs.id, parentIds)] : [])))
+      : [];
+    const enrichedLogs = logs.map((log) => ({
+      ...log,
+      parentLog: log.parentLogId ? related.find((candidate) => candidate.id === log.parentLogId) || null : null,
+      relatedLogs: related.filter((candidate) => candidate.parentLogId === log.id),
+    }));
+    return NextResponse.json({ success: true, logs: enrichedLogs, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } });
   } catch (error) { return apiError(error); }
 }

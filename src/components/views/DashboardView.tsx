@@ -26,8 +26,7 @@ import {
   BarChart,
   Bar
 } from "recharts";
-import { getJalaliPresetRange, gregorianToJalali, jalaliToString, parseJalaliString, toJalaliDate } from "@/lib/dateUtils";
-import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
+import { toJalaliDate } from "@/lib/dateUtils";
 
 interface DashboardProps {
   selectedProjectId: string | null;
@@ -43,24 +42,18 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
   const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const initialRange = getJalaliPresetRange("this_month")!;
-  const [preset, setPreset] = useState("this_month");
-  const [dateRange, setDateRange] = useState({ start: initialRange.start.toISOString(), end: initialRange.end.toISOString() });
-  const [customStart, setCustomStart] = useState(jalaliToString(gregorianToJalali(initialRange.start)));
-  const [customEnd, setCustomEnd] = useState(jalaliToString(gregorianToJalali(initialRange.end)));
 
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const rangeParam = `&startDate=${encodeURIComponent(dateRange.start)}&endDate=${encodeURIComponent(dateRange.end)}`;
       const projParam = selectedProjectId ? `&projectId=${selectedProjectId}` : "";
       const [dashRes, salesRes, productRes, customerRes, projectRes, alertRes] = await Promise.all([
-        fetch(`/api/reports?type=dashboard${projParam}${rangeParam}`).then((r) => r.json()),
-        fetch(`/api/reports?type=sales${projParam}${rangeParam}`).then((r) => r.json()),
-        fetch(`/api/reports?type=products_center${projParam}${rangeParam}`).then((r) => r.json()),
-        fetch(`/api/reports?type=customers_center${projParam}${rangeParam}`).then((r) => r.json()),
-        fetch(`/api/reports?type=projects_center${projParam}${rangeParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=dashboard${projParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=sales${projParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=products_center${projParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=customers_center${projParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=projects_center${projParam}`).then((r) => r.json()),
         fetch(`/api/alerts?page=1&pageSize=20&status=unresolved${selectedProjectId ? "&projectId=" + selectedProjectId : ""}`).then((r) => r.json()),
       ]);
 
@@ -77,28 +70,11 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
     } finally {
       setLoading(false);
     }
-  }, [dateRange.end, dateRange.start, selectedProjectId]);
+  }, [selectedProjectId]);
 
   useEffect(() => {
     void fetchDashboardData();
   }, [fetchDashboardData]);
-
-  const applyPreset = (value: string) => {
-    setPreset(value);
-    const range = getJalaliPresetRange(value);
-    if (!range) return;
-    setDateRange({ start: range.start.toISOString(), end: range.end.toISOString() });
-    setCustomStart(jalaliToString(gregorianToJalali(range.start)));
-    setCustomEnd(jalaliToString(gregorianToJalali(range.end)));
-  };
-
-  const applyCustomRange = () => {
-    const start = parseJalaliString(customStart);
-    const end = parseJalaliString(customEnd);
-    if (!start || !end || start > end) return alert("بازه تاریخ شمسی نامعتبر است.");
-    setPreset("custom");
-    setDateRange({ start: start.toISOString(), end: end.toISOString() });
-  };
 
   if (loading && !data) {
     return (
@@ -131,12 +107,9 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="grid min-w-0 gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_auto_auto] xl:items-end">
-        <label className="text-xs text-slate-300">بازه داشبورد<select value={preset} onChange={(e) => applyPreset(e.target.value)} className="mt-1 w-full rounded-xl bg-slate-950 p-2.5 text-base text-white sm:text-sm"><option value="today">امروز</option><option value="this_week">این هفته</option><option value="this_month">این ماه</option><option value="last_3_months">سه ماه اخیر</option><option value="last_6_months">شش ماه اخیر</option><option value="this_year">سال جاری شمسی</option><option value="custom">بازه دلخواه</option></select></label>
-        <JalaliDatePicker value={parseJalaliString(customStart)} onChange={(_, jalali) => setCustomStart(jalali)} label="شروع شمسی" />
-        <JalaliDatePicker value={parseJalaliString(customEnd)} onChange={(_, jalali) => setCustomEnd(jalali)} label="پایان شمسی" />
-        <button onClick={applyCustomRange} className="rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold">اعمال بازه</button>
-        <button onClick={fetchDashboardData} disabled={loading} className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-xs text-slate-200 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />به‌روزرسانی</button>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+        <div><h2 className="text-sm font-bold text-white">نمای کل سیستم</h2><p className="mt-1 text-xs text-slate-400">شاخص‌های جاری و عملکرد تجمعی {selectedProjectId ? "پروژه انتخاب‌شده" : "همه پروژه‌ها"}</p></div>
+        <button onClick={fetchDashboardData} disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-xs text-slate-200 disabled:opacity-50 sm:w-auto"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />به‌روزرسانی</button>
       </div>
       {error && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300"><span>{error}</span><button onClick={fetchDashboardData} className="rounded-lg border border-rose-400/30 px-3 py-1.5">تلاش دوباره</button></div>}
       {/* Alert Header Banner if active alerts exist */}
@@ -250,7 +223,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
             </div>
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-            <span>وصول دوره: {(kpis.collectedInPeriod || 0).toLocaleString("fa-IR")} · نرخ {kpis.collectionRate || 0}%</span>
+            <span>کل وصول: {(kpis.collectedInPeriod || 0).toLocaleString("fa-IR")} · نرخ {kpis.collectionRate || 0}%</span>
             <NeonBadge variant="yellow" size="sm">
               نقدینگی
             </NeonBadge>
@@ -259,15 +232,15 @@ export const DashboardView: React.FC<DashboardProps> = ({ selectedProjectId, onN
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-rose-500/20 bg-rose-950/20 p-4"><div className="text-xs text-slate-400">مواد اولیه زیر حداقل / بحرانی</div><div className="mt-1 text-xl font-black text-rose-300">{kpis.lowRawMaterialCount || 0} / {kpis.criticalRawMaterialCount || 0}</div></div>
+        <div className="rounded-2xl border border-rose-500/20 bg-rose-950/20 p-4"><div className="text-xs text-slate-400">وضعیت حداقل موجودی</div><div className="mt-3 space-y-2 text-xs"><div className="flex items-center justify-between gap-3"><span className="text-slate-300">مواد زیر حداقل موجودی</span><strong className="text-base text-amber-300">{(kpis.lowRawMaterialCount || 0).toLocaleString("fa-IR")}</strong></div><div className="flex items-center justify-between gap-3"><span className="text-slate-300">مواد بدون موجودی</span><strong className="text-base text-rose-300">{(kpis.criticalRawMaterialCount || 0).toLocaleString("fa-IR")}</strong></div></div></div>
         <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/20 p-4"><div className="text-xs text-slate-400">ارزش مواد اولیه</div><div className="mt-1 text-xl font-black text-cyan-300">{Math.round(kpis.rawMaterialInventoryValue || 0).toLocaleString("fa-IR")} تومان</div></div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"><div className="text-xs text-slate-400">بیشترین کمبودها</div><div className="mt-2 space-y-1">{(kpis.topShortages || []).slice(0, 3).map((item: any) => <div key={item.id} className="flex justify-between text-[11px]"><span>{item.name}</span><span className="text-rose-300">کمبود {item.shortage.toLocaleString("fa-IR")}</span></div>)}</div></div>
-        <div className="rounded-2xl border border-purple-500/20 bg-purple-950/20 p-4"><div className="text-xs text-slate-400">مشتریان ثبت‌شده</div><div className="mt-1 text-xl font-black text-purple-300">{(kpis.customerCount || 0).toLocaleString("fa-IR")}</div><div className="mt-1 text-[11px] text-slate-500">فعال در این دوره: {customerReport.length.toLocaleString("fa-IR")}</div></div>
+        <div className={`rounded-2xl border p-4 ${(kpis.rawMaterialCount || 0) > 0 && (kpis.topShortages || []).length === 0 ? "border-emerald-500/25 bg-emerald-950/20" : "border-slate-800 bg-slate-900/60"}`}><div className="text-xs font-semibold text-slate-300">مواد اولیه نیازمند تأمین</div>{(kpis.rawMaterialCount || 0) === 0 ? <p className="mt-4 text-xs leading-6 text-slate-400">هنوز ماده اولیه‌ای در سیستم ثبت نشده است.</p> : (kpis.topShortages || []).length === 0 ? <div className="mt-4 rounded-xl bg-emerald-500/10 p-3 text-xs leading-6 text-emerald-300"><strong className="block">✓ کمبود فعالی وجود ندارد</strong><span className="text-emerald-200/70">همه مواد اولیه در محدوده موجودی مجاز هستند.</span></div> : <div className="mt-3 space-y-3">{(kpis.topShortages || []).slice(0, 3).map((item: any) => { const unit = item.unit ? ` ${item.unit}` : ""; return <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3"><div className="text-xs font-bold text-white">{item.name}</div><div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-slate-400"><span>موجودی: <b className="text-slate-200">{Number(item.stock).toLocaleString("fa-IR")}{unit}</b></span><span>حداقل: <b className="text-slate-200">{Number(item.minimum).toLocaleString("fa-IR")}{unit}</b></span><span>کمبود: <b className="text-rose-300">{Number(item.shortage).toLocaleString("fa-IR")}{unit}</b></span></div></div>; })}</div>}</div>
+        <div className="rounded-2xl border border-purple-500/20 bg-purple-950/20 p-4"><div className="text-xs text-slate-400">مشتریان ثبت‌شده</div><div className="mt-1 text-xl font-black text-purple-300">{(kpis.customerCount || 0).toLocaleString("fa-IR")}</div><div className="mt-1 text-[11px] text-slate-500">مشتریان دارای فاکتور: {customerReport.length.toLocaleString("fa-IR")}</div></div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <RankingCard title="محصولات برتر دوره" rows={productReport.slice(0, 5).map((item) => ({ id: item.productId, label: item.productName, value: `${Number(item.revenue || 0).toLocaleString("fa-IR")} تومان`, meta: `حاشیه ${Number(item.margin || 0).toLocaleString("fa-IR")}%` }))} empty="فروشی برای رتبه‌بندی محصول ثبت نشده است." />
-        <RankingCard title="مشتریان برتر دوره" rows={customerReport.slice(0, 5).map((item) => ({ id: item.customerId, label: item.storeName || item.customerName, value: `${Number(item.totalSales || 0).toLocaleString("fa-IR")} تومان`, meta: `${Number(item.invoiceCount || 0).toLocaleString("fa-IR")} فاکتور` }))} empty="مشتری فعالی در این دوره وجود ندارد." />
+        <RankingCard title="محصولات برتر" rows={productReport.slice(0, 5).map((item) => ({ id: item.productId, label: item.productName, value: `${Number(item.revenue || 0).toLocaleString("fa-IR")} تومان`, meta: `حاشیه ${Number(item.margin || 0).toLocaleString("fa-IR")}%` }))} empty="فروشی برای رتبه‌بندی محصول ثبت نشده است." />
+        <RankingCard title="مشتریان برتر" rows={customerReport.slice(0, 5).map((item) => ({ id: item.customerId, label: item.storeName || item.customerName, value: `${Number(item.totalSales || 0).toLocaleString("fa-IR")} تومان`, meta: `${Number(item.invoiceCount || 0).toLocaleString("fa-IR")} فاکتور` }))} empty="مشتری دارای فروش ثبت نشده است." />
         <RankingCard title="عملکرد تیم فروش" rows={(salesReport?.employeePerformances || []).slice(0, 5).map((item: any) => ({ id: item.employeeId || item.employeeName, label: item.employeeName, value: `${Number(item.totalSales || 0).toLocaleString("fa-IR")} تومان`, meta: `${Number(item.invoiceCount || 0).toLocaleString("fa-IR")} فاکتور` }))} empty="فروشی برای رتبه‌بندی تیم ثبت نشده است." />
         <RankingCard title="مقایسه پروژه‌ها" rows={projectReport.slice(0, 5).map((item) => ({ id: item.projectId || item.projectName, label: item.projectName, value: `${Number(item.sales || 0).toLocaleString("fa-IR")} تومان`, meta: `سود ${Number(item.profit || 0).toLocaleString("fa-IR")} تومان` }))} empty="داده‌ای برای مقایسه پروژه‌ها وجود ندارد." />
       </div>

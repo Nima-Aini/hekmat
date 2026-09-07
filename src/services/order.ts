@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { customers, orderItems, orders, products } from "@/db/schema";
 import { ApiError, assertUuid, decimal } from "@/lib/apiError";
 import { createInvoice } from "@/services/invoice";
-import { logAuditEvent } from "@/services/audit";
+import { AuditContext, logAuditEvent } from "@/services/audit";
 
 export interface OrderInput {
   requestKey?: string;
@@ -78,15 +78,18 @@ export async function createOrder(input: OrderInput) {
   });
 }
 
-export async function cancelOrder(orderId: string, reason?: string) {
+export async function cancelOrder(orderId: string, reason?: string, auditContext?: AuditContext) {
   assertUuid(orderId);
   return db.transaction(async (tx) => {
     const [order] = await tx.select().from(orders).where(eq(orders.id, orderId)).for("update").limit(1);
     if (!order) throw new ApiError(404, "سفارش یافت نشد.");
     if (order.status === "converted") throw new ApiError(409, "سفارش تبدیل‌شده قابل لغو نیست.");
-    if (order.status === "cancelled") return order;
+    if (order.status === "cancelled") {
+      if (auditContext?.parentLogId) throw new ApiError(409, "این سفارش قبلاً لغو شده است.");
+      return order;
+    }
     const [updated] = await tx.update(orders).set({ status: "cancelled", notes: reason?.trim() || order.notes, updatedAt: new Date() }).where(eq(orders.id, orderId)).returning();
-    await logAuditEvent("ORDER_CANCEL", "order", order.id, { orderNumber: order.orderNumber, reason: reason || null }, undefined, tx);
+    await logAuditEvent("ORDER_CANCEL", "order", order.id, { orderNumber: order.orderNumber, projectId: order.projectId, reason: reason || null, before: { status: order.status }, after: { status: "cancelled" } }, auditContext, tx);
     return updated;
   });
 }

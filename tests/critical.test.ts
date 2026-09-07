@@ -10,6 +10,8 @@ import { apiError } from "../src/lib/apiError";
 import { displayMoneyValue, formatThousands, normalizeDigits, parseFormattedNumber } from "../src/components/ui/MoneyInput";
 import { getNeshanCoordinates } from "../src/components/maps/NeshanMapPicker";
 import { getAlertNavigation } from "../src/components/views/AlertsView";
+import { canManageAuditActions } from "../src/lib/auditAuthorization";
+import { shouldShowAdvancedReports } from "../src/lib/reportPresentation";
 
 describe("Jalali Date System", () => {
   it("gregorianToJalali converts known date", () => {
@@ -50,6 +52,24 @@ describe("Human-readable audit presentation", () => {
     expect(rows.map((row) => row.path)).toEqual(["status", "amount"]);
     expect(rows[0]).toMatchObject({ before: "باز", after: "تسویه‌شده" });
     expect(rows.some((row) => row.path === "ipAddress")).toBe(false);
+  });
+});
+
+describe("Audit management authorization", () => {
+  it("allows only the real admin role or wildcard access", () => {
+    expect(canManageAuditActions({ roleCode: "admin", permissions: [] })).toBe(true);
+    expect(canManageAuditActions({ roleCode: "manager", permissions: ["audit.view"] })).toBe(false);
+    expect(canManageAuditActions({ roleCode: "employee", permissions: ["*"] })).toBe(true);
+    expect(canManageAuditActions({ roleCode: "employee", permissions: ["audit.manage"] })).toBe(false);
+  });
+});
+
+describe("Reports specialized analysis placement", () => {
+  it("renders advanced analysis only in project comparison", () => {
+    expect(shouldShowAdvancedReports("comparison", false)).toBe(true);
+    expect(shouldShowAdvancedReports("financial", false)).toBe(false);
+    expect(shouldShowAdvancedReports("summary", false)).toBe(false);
+    expect(shouldShowAdvancedReports("comparison", true)).toBe(false);
   });
 });
 

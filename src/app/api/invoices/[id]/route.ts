@@ -2,10 +2,10 @@ import { assertUuid } from "@/lib/apiError";
 import { apiError } from "@/lib/apiError";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { invoices, invoiceItems, customers, projects, employees, products, payments } from "@/db/schema";
+import { invoices, invoiceItems, customers, projects, employees, products, payments, auditLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { reverseInvoice, updateInvoice, deleteInvoice } from "@/services/invoice";
-import { requirePermission } from "@/services/access";
+import { requireAuditManager, requirePermission } from "@/services/access";
 import { logAuditEvent } from "@/services/audit";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -129,6 +129,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }
 
     if (!isManagerOrAdmin && ((body.employeeId !== undefined && body.employeeId !== existing.employeeId) || (body.customerId !== undefined && body.customerId !== existing.customerId) || (body.projectId !== undefined && body.projectId !== existing.projectId))) return NextResponse.json({ success: false, error: "تغییر مالکیت فاکتور مجاز نیست." }, { status: 403 });
+    let auditContext;
+    if (body.auditParentLogId) {
+      assertUuid(body.auditParentLogId);
+      const auditManager = await requireAuditManager();
+      const [parent] = await db.select().from(auditLogs).where(eq(auditLogs.id, body.auditParentLogId)).limit(1);
+      if (!parent || parent.entityType !== "invoice" || parent.entityId !== id) return NextResponse.json({ success: false, error: "رویداد مرجع با این فاکتور تطبیق ندارد." }, { status: 400 });
+      auditContext = { userId: auditManager.employeeId, userName: auditManager.employeeName, parentLogId: parent.id, source: "audit_log" };
+    }
     const updated = await updateInvoice(id, {
       customerId: body.customerId,
       employeeId: body.employeeId !== undefined ? (body.employeeId || null) : undefined,
@@ -140,7 +148,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       invoiceDiscount: body.invoiceDiscount !== undefined ? Number(body.invoiceDiscount) : undefined,
       paymentStatus: body.paymentStatus,
       items: body.items,
-    });
+    }, auditContext);
 
     return NextResponse.json({ success: true, invoice: updated });
   } catch (error: any) {
