@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { NeonBadge } from "@/components/ui/NeonBadge";
 import {
   TrendingUp,
@@ -38,6 +38,8 @@ import {
   formatMoney,
   formatMoneyDual,
   formatNumber,
+  getJalaliPresetRange,
+  getJalaliMonthLength,
   jalaliToGregorian,
   parseJalaliString,
   gregorianToJalali,
@@ -49,12 +51,14 @@ import { triggerTaxDeclarationPrint } from "@/lib/taxPrintHelper";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { AdvancedReportsPanel } from "@/components/views/AdvancedReportsPanel";
+import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
 
 export const ReportsView: React.FC<{
   selectedProjectId: string | null;
   initialTab?: "financial" | "tax_declaration" | "sales" | "inflation" | "comparison";
   taxOnly?: boolean;
 }> = ({ selectedProjectId, initialTab = "financial", taxOnly = false }) => {
+  const initialReportRange = getJalaliPresetRange("this_month")!;
   const [activeTab, setActiveTab] = useState<"financial" | "tax_declaration" | "sales" | "inflation" | "comparison">(initialTab);
 
   useEffect(() => {
@@ -67,6 +71,10 @@ export const ReportsView: React.FC<{
   const [projects, setProjects] = useState<any[]>([]);
   const [comparisonData, setComparisonData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [reportError, setReportError] = useState("");
+  const [reportPreset, setReportPreset] = useState("this_month");
+  const [reportStartDate, setReportStartDate] = useState(() => initialReportRange.start.toISOString());
+  const [reportEndDate, setReportEndDate] = useState(() => initialReportRange.end.toISOString());
 
   // Tax Declaration state
   const [taxData, setTaxData] = useState<any>(null);
@@ -81,7 +89,7 @@ export const ReportsView: React.FC<{
   });
   const [taxJalaliEnd, setTaxJalaliEnd] = useState(() => {
     const curYear = gregorianToJalali(new Date()).year;
-    return `${curYear}/12/29`;
+    return `${curYear}/12/${getJalaliMonthLength(curYear, 12)}`;
   });
   const [taxStartDate, setTaxStartDate] = useState(() => {
     const curYear = gregorianToJalali(new Date()).year;
@@ -89,7 +97,7 @@ export const ReportsView: React.FC<{
   });
   const [taxEndDate, setTaxEndDate] = useState(() => {
     const curYear = gregorianToJalali(new Date()).year;
-    return jalaliToGregorian({ year: curYear, month: 12, day: 29 }).toISOString().split("T")[0];
+    return jalaliToGregorian({ year: curYear, month: 12, day: getJalaliMonthLength(curYear, 12) }).toISOString().split("T")[0];
   });
   const [taxDateError, setTaxDateError] = useState("");
   const [generatingPdf, setGeneratingPdf] = useState(false);
@@ -106,19 +114,32 @@ export const ReportsView: React.FC<{
   const [projA, setProjA] = useState("");
   const [projB, setProjB] = useState("");
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if (!reportStartDate || !reportEndDate) {
+      setLoading(false);
+      setReportError("انتخاب تاریخ شروع و پایان الزامی است.");
+      return;
+    }
+    if (new Date(reportStartDate) > new Date(reportEndDate)) {
+      setLoading(false);
+      setReportError("تاریخ شروع نباید بعد از تاریخ پایان باشد.");
+      return;
+    }
     setLoading(true);
+    setReportError("");
     try {
       const projParam = selectedProjectId ? `&projectId=${selectedProjectId}` : "";
+      const dateParam = `&startDate=${reportStartDate}&endDate=${reportEndDate}`;
       const [finRes, salesRes, projRes, rmRes] = await Promise.all([
-        fetch(`/api/reports?type=financial${projParam}`).then((r) => r.json()),
-        fetch(`/api/reports?type=sales${projParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=financial${projParam}${dateParam}`).then((r) => r.json()),
+        fetch(`/api/reports?type=sales${projParam}${dateParam}`).then((r) => r.json()),
         fetch("/api/projects").then((r) => r.json()),
         fetch("/api/raw-materials").then((r) => r.json()),
       ]);
 
-      if (finRes.success) setFinancialData(finRes.data);
-      if (salesRes.success) setSalesData(salesRes.data);
+      if (!finRes.success || !salesRes.success) throw new Error(finRes.error || salesRes.error || "دریافت گزارش انجام نشد.");
+      setFinancialData(finRes.data);
+      setSalesData(salesRes.data);
       if (projRes.success) {
         setProjects(projRes.projects || []);
         if (projRes.projects.length >= 2) {
@@ -129,12 +150,13 @@ export const ReportsView: React.FC<{
       if (rmRes.success) setRawMaterials(rmRes.rawMaterials || []);
     } catch (err) {
       console.error("Error fetching report data:", err);
+      setReportError(err instanceof Error ? err.message : "دریافت گزارش انجام نشد.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [reportEndDate, reportStartDate, selectedProjectId]);
 
-  const fetchTaxDeclaration = async (start = taxStartDate, end = taxEndDate) => {
+  const fetchTaxDeclaration = useCallback(async (start: string, end: string) => {
     setTaxLoading(true);
     setTaxDateError("");
     try {
@@ -154,12 +176,18 @@ export const ReportsView: React.FC<{
     } finally {
       setTaxLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchData();
-    fetchTaxDeclaration(taxStartDate, taxEndDate);
   }, [selectedProjectId]);
+
+  useEffect(() => { void fetchData(); }, [fetchData]);
+  useEffect(() => { void fetchTaxDeclaration(taxStartDate, taxEndDate); }, [fetchTaxDeclaration, taxEndDate, taxStartDate]);
+
+  const applyReportPreset = (preset: string) => {
+    const range = getJalaliPresetRange(preset);
+    if (!range) return;
+    setReportPreset(preset);
+    setReportStartDate(range.start.toISOString());
+    setReportEndDate(range.end.toISOString());
+  };
 
   const handlePresetChange = (preset: string) => {
     setTaxPreset(preset);
@@ -169,11 +197,11 @@ export const ReportsView: React.FC<{
     const year = match ? Number(match[2]) : currentYear;
     const season = match?.[1] || "year";
     const ranges: Record<string, [{ year: number; month: number; day: number }, { year: number; month: number; day: number }]> = {
-      year: [{ year, month: 1, day: 1 }, { year, month: 12, day: 29 }],
+      year: [{ year, month: 1, day: 1 }, { year, month: 12, day: getJalaliMonthLength(year, 12) }],
       spring: [{ year, month: 1, day: 1 }, { year, month: 3, day: 31 }],
       summer: [{ year, month: 4, day: 1 }, { year, month: 6, day: 31 }],
       autumn: [{ year, month: 7, day: 1 }, { year, month: 9, day: 30 }],
-      winter: [{ year, month: 10, day: 1 }, { year, month: 12, day: 29 }],
+      winter: [{ year, month: 10, day: 1 }, { year, month: 12, day: getJalaliMonthLength(year, 12) }],
     };
     const [jStart, jEnd] = ranges[season] || ranges.year;
 
@@ -186,7 +214,6 @@ export const ReportsView: React.FC<{
     const e = jalaliToGregorian(jEnd).toISOString().split("T")[0];
     setTaxStartDate(s);
     setTaxEndDate(e);
-    fetchTaxDeclaration(s, e);
   };
 
   const handleJalaliDateChange = (type: "start" | "end", rawVal: string) => {
@@ -199,22 +226,16 @@ export const ReportsView: React.FC<{
       const parsedStart = parseJalaliString(latinVal);
       const parsedEnd = parseJalaliString(taxJalaliEnd);
       if (parsedStart && !isNaN(parsedStart.getTime())) {
-        const s = parsedStart.toISOString().split("T")[0];
-        setTaxStartDate(s);
-        if (parsedEnd && parsedStart <= parsedEnd) {
-          fetchTaxDeclaration(s, taxEndDate);
-        }
+        if (parsedEnd && parsedStart > parsedEnd) return setTaxDateError("تاریخ شروع نباید بعد از تاریخ پایان باشد.");
+        setTaxStartDate(parsedStart.toISOString().split("T")[0]);
       }
     } else {
       setTaxJalaliEnd(latinVal);
       const parsedStart = parseJalaliString(taxJalaliStart);
       const parsedEnd = parseJalaliString(latinVal);
       if (parsedEnd && !isNaN(parsedEnd.getTime())) {
-        const e = parsedEnd.toISOString().split("T")[0];
-        setTaxEndDate(e);
-        if (parsedStart && parsedStart <= parsedEnd) {
-          fetchTaxDeclaration(taxStartDate, e);
-        }
+        if (parsedStart && parsedStart > parsedEnd) return setTaxDateError("تاریخ پایان نباید قبل از تاریخ شروع باشد.");
+        setTaxEndDate(parsedEnd.toISOString().split("T")[0]);
       }
     }
   };
@@ -226,13 +247,13 @@ export const ReportsView: React.FC<{
     let mStart = 1;
     let dStart = 1;
     let mEnd = 12;
-    let dEnd = 29;
+    let dEnd = getJalaliMonthLength(toYear, 12);
 
     if (quarter === "full") {
       mStart = 1;
       dStart = 1;
       mEnd = 12;
-      dEnd = 29;
+      dEnd = getJalaliMonthLength(toYear, 12);
     } else if (quarter === "q1") {
       mStart = 1;
       dStart = 1;
@@ -252,7 +273,7 @@ export const ReportsView: React.FC<{
       mStart = 10;
       dStart = 1;
       mEnd = 12;
-      dEnd = 29;
+      dEnd = getJalaliMonthLength(toYear, 12);
     } else if (quarter === "h1") {
       mStart = 1;
       dStart = 1;
@@ -262,7 +283,7 @@ export const ReportsView: React.FC<{
       mStart = 7;
       dStart = 1;
       mEnd = 12;
-      dEnd = 29;
+      dEnd = getJalaliMonthLength(toYear, 12);
     }
 
     const jStart = { year: fromYear, month: mStart, day: dStart };
@@ -277,7 +298,6 @@ export const ReportsView: React.FC<{
     const e = jalaliToGregorian(jEnd).toISOString().split("T")[0];
     setTaxStartDate(s);
     setTaxEndDate(e);
-    fetchTaxDeclaration(s, e);
   };
 
   const handleDownloadTaxPdf = async () => {
@@ -376,10 +396,14 @@ export const ReportsView: React.FC<{
     }
   };
 
-  if (loading) {
+  if (loading && !financialData && !salesData) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <RefreshCw className="h-8 w-8 animate-spin text-purple-500" />
+      <div role="status" aria-label="در حال بارگذاری گزارش‌ها" className="animate-pulse space-y-5">
+        <div className="flex items-center justify-between gap-4"><div className="space-y-2"><div className="h-6 w-56 rounded bg-slate-800" /><div className="h-3 w-72 max-w-full rounded bg-slate-900" /></div><div className="h-10 w-64 rounded-2xl bg-slate-900" /></div>
+        <div className="h-24 rounded-2xl border border-slate-800 bg-slate-900/60" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-32 rounded-2xl border border-slate-800 bg-slate-900/60" />)}</div>
+        <div className="h-80 rounded-2xl border border-slate-800 bg-slate-900/60" />
+        <span className="sr-only">در حال بارگذاری مرکز گزارش‌ها…</span>
       </div>
     );
   }
@@ -437,6 +461,14 @@ export const ReportsView: React.FC<{
           </button>
         </div>}
       </div>
+
+      {!taxOnly && activeTab !== "tax_declaration" && <section className="grid min-w-0 gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_auto] xl:items-end">
+        <label className="text-xs text-slate-400">بازه گزارش<select value={reportPreset} onChange={(event) => applyReportPreset(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-base text-white sm:text-sm"><option value="today">امروز</option><option value="this_week">این هفته</option><option value="this_month">این ماه</option><option value="last_3_months">سه ماه اخیر</option><option value="last_6_months">شش ماه اخیر</option><option value="this_year">سال جاری شمسی</option><option value="custom">بازه دلخواه</option></select></label>
+        <JalaliDatePicker value={reportStartDate} onChange={(date) => { setReportPreset("custom"); setReportStartDate(date ? date.toISOString() : ""); }} label="شروع دوره" />
+        <JalaliDatePicker value={reportEndDate} onChange={(date) => { setReportPreset("custom"); setReportEndDate(date ? date.toISOString() : ""); }} label="پایان دوره" />
+        <button onClick={fetchData} disabled={loading || !reportStartDate || !reportEndDate} className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-xs text-slate-200 disabled:opacity-40"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />به‌روزرسانی</button>
+        {reportError && <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300 sm:col-span-2 xl:col-span-4">{reportError}</div>}
+      </section>}
 
       {/* Tab: Tax Declaration (اظهارنامه مالیاتی رسمی) */}
       {activeTab === "tax_declaration" && (
@@ -524,41 +556,9 @@ export const ReportsView: React.FC<{
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                  <div>
-                    <label className="block text-[11px] text-slate-300 font-semibold mb-1">
-                      از تاریخ شمسی (آغاز دوره):
-                    </label>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={taxJalaliStart}
-                      onChange={(e) => handleJalaliDateChange("start", e.target.value)}
-                      placeholder={`${currentJalaliYear}/01/01`}
-                      className="w-full rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-xs font-mono font-bold text-amber-300 text-center focus:border-amber-500 focus:outline-none"
-                    />
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
-                      <span>میلادی: {taxStartDate}</span>
-                      <span>شمسی: {toJalaliDate(taxStartDate)}</span>
-                    </div>
-                  </div>
+                  <JalaliDatePicker value={taxStartDate} onChange={(_, jalali) => handleJalaliDateChange("start", jalali)} label="از تاریخ شمسی (آغاز دوره)" placeholder={`${currentJalaliYear}/01/01`} />
 
-                  <div>
-                    <label className="block text-[11px] text-slate-300 font-semibold mb-1">
-                      تا تاریخ شمسی (پایان دوره):
-                    </label>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={taxJalaliEnd}
-                      onChange={(e) => handleJalaliDateChange("end", e.target.value)}
-                      placeholder={`${currentJalaliYear}/12/29`}
-                      className="w-full rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-xs font-mono font-bold text-amber-300 text-center focus:border-amber-500 focus:outline-none"
-                    />
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
-                      <span>میلادی: {taxEndDate}</span>
-                      <span>شمسی: {toJalaliDate(taxEndDate)}</span>
-                    </div>
-                  </div>
+                  <JalaliDatePicker value={taxEndDate} onChange={(_, jalali) => handleJalaliDateChange("end", jalali)} label="تا تاریخ شمسی (پایان دوره)" placeholder={`${currentJalaliYear}/12/${getJalaliMonthLength(currentJalaliYear, 12)}`} />
 
                   <div>
                     <button

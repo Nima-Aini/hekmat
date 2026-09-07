@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BarChart3, RefreshCw } from "lucide-react";
-import { formatMoney, gregorianToJalali, isJalaliLeapYear, jalaliToGregorian } from "@/lib/dateUtils";
+import { BarChart3, Download, RefreshCw } from "lucide-react";
+import { formatMoney, formatNumber, gregorianToJalali, isJalaliLeapYear, jalaliToGregorian } from "@/lib/dateUtils";
+import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
 
-type ReportType = "expenses_center" | "products_center" | "customers_center" | "projects_center" | "commissions_center" | "period_comparison";
+type ReportType = "expenses_center" | "products_center" | "customers_center" | "projects_center" | "commissions_center" | "inventory" | "period_comparison";
 
 const reportLabels: Record<ReportType, string> = {
   expenses_center: "هزینه‌ها",
@@ -12,6 +13,7 @@ const reportLabels: Record<ReportType, string> = {
   customers_center: "مشتریان",
   projects_center: "پروژه‌ها",
   commissions_center: "پورسانت‌ها",
+  inventory: "انبار و مواد اولیه",
   period_comparison: "مقایسه دو دوره",
 };
 
@@ -22,8 +24,8 @@ function jalaliDateToIso(value: string) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
-const NumberCard = ({ title, value }: { title: string; value: number }) => (
-  <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4"><span className="text-xs text-slate-400">{title}</span><strong className="mt-2 block font-mono text-lg text-cyan-300">{formatMoney(value || 0)}</strong></div>
+const NumberCard = ({ title, value, money = true }: { title: string; value: number; money?: boolean }) => (
+  <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4"><span className="text-xs text-slate-400">{title}</span><strong className="mt-2 block font-mono text-lg text-cyan-300">{money ? formatMoney(value || 0) : formatNumber(value || 0)}</strong></div>
 );
 
 export function AdvancedReportsPanel({ selectedProjectId }: { selectedProjectId: string | null }) {
@@ -69,15 +71,26 @@ export function AdvancedReportsPanel({ selectedProjectId }: { selectedProjectId:
 
   useEffect(() => { void load(); }, [load]);
 
-  const rows: any[] = Array.isArray(data) ? data : data?.categories || [];
+  const rows: any[] = Array.isArray(data) ? data : data?.categories || data?.rawMaterials || [];
+  const downloadCsv = () => {
+    const exportRows = type === "period_comparison" && data ? [{ period: "دوره اصلی", ...(data.periodA || {}) }, { period: "دوره مقایسه", ...(data.periodB || {}) }] : rows;
+    if (!exportRows.length) return;
+    const headers = [...new Set(exportRows.flatMap((row) => Object.keys(row).filter((key) => typeof row[key] !== "object")))];
+    const labels: Record<string, string> = { period: "دوره", category: "دسته", productName: "محصول", customerName: "مشتری", storeName: "فروشگاه", projectName: "پروژه", employeeName: "همکار", total: "جمع", count: "تعداد", revenue: "درآمد", grossProfit: "سود ناخالص", margin: "حاشیه سود", invoiceCount: "تعداد فاکتور", totalSales: "فروش", collected: "وصول", outstanding: "مانده", overdue: "سررسیدگذشته", sales: "فروش", profit: "سود", receivables: "مطالبات", earned: "پورسانت کل", payable: "قابل پرداخت", paid: "پرداخت‌شده", unpaid: "باقی‌مانده" };
+    const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const csv = `\uFEFF${headers.map((header) => escape(labels[header] || header)).join(",")}\n${exportRows.map((row) => headers.map((header) => escape(row[header])).join(",")).join("\n")}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `report-${type}.csv`; anchor.click(); URL.revokeObjectURL(url);
+  };
 
   return <section className="mt-8 space-y-4 rounded-3xl border border-cyan-500/20 bg-slate-900/50 p-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="flex items-center gap-2 text-base font-black text-white"><BarChart3 className="h-5 w-5 text-cyan-400" />تحلیل‌های تخصصی</h2><p className="mt-1 text-xs text-slate-400">تجمیع، فیلتر و محاسبه روی سرور انجام می‌شود.</p></div><button onClick={load} disabled={loading} className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 disabled:opacity-50"><RefreshCw className={`inline h-4 w-4 ${loading ? "animate-spin" : ""}`} /> بروزرسانی</button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="flex items-center gap-2 text-base font-black text-white"><BarChart3 className="h-5 w-5 text-cyan-400" />تحلیل‌های تخصصی</h2><p className="mt-1 text-xs text-slate-400">تجمیع، فیلتر و محاسبه روی سرور انجام می‌شود.</p></div><div className="flex flex-wrap gap-2"><button onClick={downloadCsv} disabled={loading || (!rows.length && type !== "period_comparison")} className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 disabled:opacity-40"><Download className="inline h-4 w-4" /> خروجی CSV</button><button onClick={load} disabled={loading} className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 disabled:opacity-50"><RefreshCw className={`inline h-4 w-4 ${loading ? "animate-spin" : ""}`} /> بروزرسانی</button></div></div>
     <div className="grid gap-3 md:grid-cols-4">
       <label className="text-xs text-slate-400">نوع گزارش<select value={type} onChange={(event) => setType(event.target.value as ReportType)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white">{Object.entries(reportLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <label className="text-xs text-slate-400">شروع شمسی<input value={start} onChange={(event) => setStart(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 font-mono text-white" /></label>
-      <label className="text-xs text-slate-400">پایان شمسی<input value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 font-mono text-white" /></label>
-      {type === "period_comparison" && <div className="grid grid-cols-2 gap-2"><label className="text-xs text-slate-400">شروع مقایسه<input value={compareStart} onChange={(event) => setCompareStart(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 font-mono text-white" /></label><label className="text-xs text-slate-400">پایان مقایسه<input value={compareEnd} onChange={(event) => setCompareEnd(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 font-mono text-white" /></label></div>}
+      <JalaliDatePicker value={jalaliDateToIso(start)} onChange={(_, jalali) => setStart(jalali)} label="شروع شمسی" />
+      <JalaliDatePicker value={jalaliDateToIso(end)} onChange={(_, jalali) => setEnd(jalali)} label="پایان شمسی" />
+      {type === "period_comparison" && <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:col-span-2"><JalaliDatePicker value={jalaliDateToIso(compareStart)} onChange={(_, jalali) => setCompareStart(jalali)} label="شروع مقایسه" /><JalaliDatePicker value={jalaliDateToIso(compareEnd)} onChange={(_, jalali) => setCompareEnd(jalali)} label="پایان مقایسه" /></div>}
     </div>
     {error && <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300">{error}</div>}
     {loading && !data ? <div className="p-10 text-center text-sm text-slate-400"><RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin" />در حال محاسبه گزارش…</div> : null}
@@ -86,6 +99,7 @@ export function AdvancedReportsPanel({ selectedProjectId }: { selectedProjectId:
     {type === "customers_center" && <ReportTable headers={["مشتری/فروشگاه", "فروش", "وصول", "مانده", "سررسید گذشته", "فاکتور"]} rows={rows.map((row) => [row.storeName || row.customerName, formatMoney(row.totalSales), formatMoney(row.collected), formatMoney(row.outstanding), formatMoney(row.overdue), row.invoiceCount])} />}
     {type === "projects_center" && <ReportTable headers={["پروژه", "فروش", "وصول", "مطالبات", "سود", "فاکتور"]} rows={rows.map((row) => [row.projectName, formatMoney(row.sales), formatMoney(row.collected), formatMoney(row.receivables), formatMoney(row.profit), row.invoiceCount])} />}
     {type === "commissions_center" && <ReportTable headers={["همکار", "پورسانت کل", "قابل پرداخت", "پرداخت‌شده", "باقی‌مانده"]} rows={rows.map((row) => [row.employeeName, formatMoney(row.earned), formatMoney(row.payable), formatMoney(row.paid), formatMoney(row.unpaid)])} />}
+    {type === "inventory" && data && <><div className="grid gap-3 sm:grid-cols-2"><NumberCard title="ارزش مواد اولیه" value={data.totalRawMaterialValue} /><NumberCard title="تعداد اقلام کم‌موجودی" value={rows.filter((row) => row.isLow).length} money={false} /></div><ReportTable headers={["ماده اولیه", "موجودی", "حداقل", "بهای میانگین", "ارزش", "وضعیت"]} rows={rows.map((row) => [row.name, `${row.stockQuantity} ${row.unit || ""}`, row.minStockQuantity, formatMoney(row.averageCost), formatMoney(row.totalValue), row.isLow ? "نیازمند تأمین" : "عادی"])} /></>}
     {type === "period_comparison" && data && <div className="grid gap-3 md:grid-cols-3"><NumberCard title="فروش دوره اصلی" value={data.periodA?.totalSales} /><NumberCard title="فروش دوره مقایسه" value={data.periodB?.totalSales} /><NumberCard title="تغییر فروش (درصد)" value={data.changes?.totalSales} /></div>}
   </section>;
 }

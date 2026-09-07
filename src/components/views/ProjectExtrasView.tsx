@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Save, Plus, BarChart3, GitCompare, Package, Coins, ListTodo, ReceiptText, WalletCards, Trash2, Calendar, Tag, AlertCircle, Building, CheckCircle2 } from "lucide-react";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
 import { toJalaliDate } from "@/lib/dateUtils";
 
 const money = (n: number) => new Intl.NumberFormat("fa-IR").format(Math.round(n));
@@ -339,12 +340,7 @@ export const ProjectExtrasView: React.FC<{ project: any; tab: string; employees:
                 </option>
               ))}
             </select>
-            <input
-              type="date"
-              value={form.dueDate || ""}
-              onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-              className="rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-xs"
-            />
+            <JalaliDatePicker value={form.dueDate || null} onChange={(date) => setForm({ ...form, dueDate: date ? date.toISOString().slice(0, 10) : "" })} placeholder="سررسید" />
             <select
               value={form.priority || "medium"}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
@@ -483,12 +479,7 @@ export const ProjectExtrasView: React.FC<{ project: any; tab: string; employees:
 
               <div>
                 <label className="block text-[11px] text-slate-300 mb-1">تاریخ هزینه</label>
-                <input
-                  type="date"
-                  value={form.expenseDate || new Date().toISOString().split("T")[0]}
-                  onChange={(e) => setForm({ ...form, expenseDate: e.target.value })}
-                  className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
-                />
+                <JalaliDatePicker value={form.expenseDate || new Date()} onChange={(date) => setForm({ ...form, expenseDate: date ? date.toISOString().slice(0, 10) : "" })} />
               </div>
 
               <div>

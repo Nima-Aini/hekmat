@@ -4,7 +4,8 @@
  * Coverage: Authorization, Expense accounting, Invoice, Pagination, Jalali
  */
 import { describe, it, expect } from "vitest";
-import { parseJalaliString, gregorianToJalali, jalaliToGregorian, toJalaliDate } from "../src/lib/dateUtils";
+import { parseJalaliString, gregorianToJalali, getJalaliMonthLength, jalaliToGregorian, toJalaliDate } from "../src/lib/dateUtils";
+import { auditActionLabel, getAuditDetailRows, getAuditSummary } from "../src/lib/auditPresentation";
 import { apiError } from "../src/lib/apiError";
 import { displayMoneyValue, formatThousands, normalizeDigits, parseFormattedNumber } from "../src/components/ui/MoneyInput";
 import { getNeshanCoordinates } from "../src/components/maps/NeshanMapPicker";
@@ -31,6 +32,24 @@ describe("Jalali Date System", () => {
   it("invalid Jalali returns null", () => {
     expect(parseJalaliString("invalid")).toBeNull();
     expect(parseJalaliString("1403/13/01")).toBeNull();
+  });
+  it("returns the real Jalali month length", () => {
+    expect(getJalaliMonthLength(1403, 1)).toBe(31);
+    expect(getJalaliMonthLength(1403, 12)).toBe(30);
+    expect(getJalaliMonthLength(1404, 12)).toBe(29);
+  });
+});
+
+describe("Human-readable audit presentation", () => {
+  it("translates actions and creates a Persian summary", () => {
+    expect(auditActionLabel("ORDER_CREATE")).toBe("ایجاد شد");
+    expect(getAuditSummary({ action: "CREATE", entityType: "invoice", details: { invoiceNumber: "INV-10" } })).toContain("INV-10");
+  });
+  it("shows changed fields without exposing raw JSON", () => {
+    const rows = getAuditDetailRows({ before: { status: "open", amount: 1000 }, after: { status: "paid", amount: 2000 }, ipAddress: "127.0.0.1" });
+    expect(rows.map((row) => row.path)).toEqual(["status", "amount"]);
+    expect(rows[0]).toMatchObject({ before: "باز", after: "تسویه‌شده" });
+    expect(rows.some((row) => row.path === "ipAddress")).toBe(false);
   });
 });
 
