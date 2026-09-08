@@ -16,6 +16,7 @@ export async function GET(req: Request) {
     const page = pageNumber(searchParams.get("page"), 1);
     const pageSize = pageNumber(searchParams.get("pageSize"), 20, 100);
     const status = searchParams.get("status");
+    const activeOnly = searchParams.get("activeOnly") === "true";
     const conditions = [];
     const id = searchParams.get("id");
     if (id) { assertUuid(id); conditions.push(eq(orders.id, id)); }
@@ -24,6 +25,7 @@ export async function GET(req: Request) {
     if (!manager) conditions.push(eq(orders.employeeId, context.employeeId));
     if (projectId) conditions.push(eq(orders.projectId, projectId));
     if (status) conditions.push(eq(orders.status, status));
+    else if (activeOnly) conditions.push(inArray(orders.status, ["open", "ready"]));
     if (search) conditions.push(or(ilike(orders.orderNumber, `%${search}%`), ilike(customers.name, `%${search}%`), ilike(customers.storeName, `%${search}%`))!);
     const where = and(...conditions);
     const sort = searchParams.get("sortOrder") === "asc" ? asc(orders.createdAt) : desc(orders.createdAt);

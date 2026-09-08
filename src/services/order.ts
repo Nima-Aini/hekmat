@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { customers, orderItems, orders, products } from "@/db/schema";
 import { ApiError, assertUuid, decimal } from "@/lib/apiError";
-import { createInvoice } from "@/services/invoice";
+import { createInvoice, type CreateInvoiceInput } from "@/services/invoice";
 import { AuditContext, logAuditEvent } from "@/services/audit";
 
 export interface OrderInput {
@@ -94,7 +94,9 @@ export async function cancelOrder(orderId: string, reason?: string, auditContext
   });
 }
 
-export async function convertOrderToInvoice(orderId: string, actorId: string) {
+export type OrderConversionInput = Pick<CreateInvoiceInput, "invoiceDate" | "dueDate" | "invoiceDiscount" | "items" | "initialPayment" | "notes">;
+
+export async function convertOrderToInvoice(orderId: string, actorId: string, draft?: OrderConversionInput) {
   assertUuid(orderId);
   return db.transaction(async (tx) => {
     const [order] = await tx.select().from(orders).where(eq(orders.id, orderId)).for("update").limit(1);
@@ -103,19 +105,23 @@ export async function convertOrderToInvoice(orderId: string, actorId: string) {
     if (order.status === "cancelled") throw new ApiError(409, "سفارش لغوشده قابل تبدیل نیست.");
     const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, order.id));
     if (!items.length) throw new ApiError(409, "سفارش بدون قلم قابل تبدیل نیست.");
-    const invoice = await createInvoice({
+    const invoiceInput: CreateInvoiceInput = {
       requestKey: `order-convert:${order.id}`,
-      requestHash: order.updatedAt.toISOString(),
+      requestHash: crypto.createHash("sha256").update(JSON.stringify(draft || { updatedAt: order.updatedAt.toISOString() })).digest("hex"),
       customerId: order.customerId,
       projectId: order.projectId,
       employeeId: order.employeeId,
       salesMode: order.employeeId ? "visitor" : "direct",
-      invoiceDate: new Date(),
-      items: items.map((item) => ({ productId: item.productId, quantity: Number(item.quantity), unitPrice: Number(item.unitPriceSnapshot) })),
-      notes: [order.notes, `تبدیل‌شده از سفارش ${order.orderNumber}`].filter(Boolean).join(" - "),
-    }, tx);
+      invoiceDate: draft?.invoiceDate || new Date(),
+      dueDate: draft?.dueDate,
+      invoiceDiscount: draft?.invoiceDiscount || 0,
+      items: draft?.items?.length ? draft.items : items.map((item) => ({ productId: item.productId, quantity: Number(item.quantity), unitPrice: Number(item.unitPriceSnapshot), customNotes: item.notes || undefined })),
+      initialPayment: draft?.initialPayment,
+      notes: draft?.notes || [order.notes, `تبدیل‌شده از سفارش ${order.orderNumber}`].filter(Boolean).join(" - "),
+    };
+    const invoice = await createInvoice(invoiceInput, tx);
     await tx.update(orders).set({ status: "converted", convertedInvoiceId: invoice.id, updatedAt: new Date() }).where(eq(orders.id, order.id));
-    await logAuditEvent("ORDER_CONVERT", "order", order.id, { orderNumber: order.orderNumber, invoiceId: invoice.id, actorId }, undefined, tx);
+    await logAuditEvent("ORDER_CONVERT", "order", order.id, { orderNumber: order.orderNumber, invoiceId: invoice.id, actorId, before: { status: order.status }, after: { status: "converted" } }, undefined, tx);
     return invoice;
   });
 }

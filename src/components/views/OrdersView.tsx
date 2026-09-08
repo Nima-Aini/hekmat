@@ -5,8 +5,9 @@ import { FilePlus2, Plus, RefreshCw, ShoppingCart, X } from "lucide-react";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
 import { formatMoney, toJalaliDate } from "@/lib/dateUtils";
+import { buildOrderInvoiceDraft, isActiveOrderStatus, type OrderInvoiceDraft } from "@/lib/orderWorkflow";
 
-export function OrdersView({ selectedProjectId, permissions }: { selectedProjectId?: string | null; permissions?: Set<string> | string[] }) {
+export function OrdersView({ selectedProjectId, permissions, onPrepareInvoice }: { selectedProjectId?: string | null; permissions?: Set<string> | string[]; onPrepareInvoice?: (draft: OrderInvoiceDraft) => void }) {
   const [orders, setOrders] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -27,6 +28,7 @@ export function OrdersView({ selectedProjectId, permissions }: { selectedProject
       const params = new URLSearchParams({ page: String(page), pageSize: "20" });
       if (selectedProjectId) params.set("projectId", selectedProjectId);
       if (focusOrderId) params.set("id", focusOrderId);
+      else params.set("activeOnly", "true");
       const data = await fetch(`/api/orders?${params}`).then((response) => response.json());
       if (!data.success) throw new Error(data.error || "خطا در دریافت سفارش‌ها");
       setOrders(data.orders || []); setPagination(data.pagination || { total: 0, totalPages: 1 });
@@ -58,11 +60,9 @@ export function OrdersView({ selectedProjectId, permissions }: { selectedProject
     } catch (cause: any) { setError(cause.message || "ثبت سفارش ناموفق بود."); }
     finally { setSaving(false); }
   };
-  const convert = async (id: string) => {
-    if (!confirm("این سفارش به فاکتور تبدیل شود؟ موجودی و اسناد مالی فقط در این مرحله ثبت می‌شوند.")) return;
-    const data = await fetch(`/api/orders/${id}/convert`, { method: "POST" }).then((r) => r.json());
-    if (!data.success) return alert(data.error || "تبدیل سفارش ناموفق بود.");
-    await load(); window.dispatchEvent(new CustomEvent("akma:navigate-item", { detail: { type: "invoice", id: data.invoice.id } }));
+  const convert = (order: any) => {
+    if (!onPrepareInvoice) return alert("صفحه صدور فاکتور در دسترس نیست.");
+    onPrepareInvoice(buildOrderInvoiceDraft(order));
   };
   const cancel = async (id: string) => {
     if (!confirm("این سفارش لغو شود؟ اطلاعات سفارش و تاریخچه آن حذف نخواهد شد.")) return;
@@ -71,7 +71,7 @@ export function OrdersView({ selectedProjectId, permissions }: { selectedProject
     await load();
   };
   const statusLabel = (status: string) => ({ open: "باز", ready: "آماده", converted: "تبدیل‌شده", cancelled: "لغوشده" })[status] || status;
-  const orderActions = (order: any) => <>{["open", "ready"].includes(order.status) && can("orders.convert") && <button onClick={() => convert(order.id)} className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white">تبدیل به فاکتور</button>}{["open", "ready"].includes(order.status) && can("orders.cancel") && <button onClick={() => cancel(order.id)} className="rounded-lg border border-rose-500/40 px-3 py-1.5 font-bold text-rose-300">لغو</button>}</>;
+  const orderActions = (order: any) => <>{isActiveOrderStatus(order.status) && can("orders.convert") && <button onClick={() => convert(order)} className="min-w-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">تبدیل به فاکتور</button>}{isActiveOrderStatus(order.status) && can("orders.cancel") && <button onClick={() => cancel(order.id)} className="min-w-0 rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-bold text-rose-300">لغو</button>}</>;
 
   return <div className="space-y-5">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -82,12 +82,12 @@ export function OrdersView({ selectedProjectId, permissions }: { selectedProject
     {error && <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300">{error}</div>}
     <div className="rounded-2xl border border-slate-800 bg-slate-900/50">
       {loading ? <div className="p-12 text-center text-sm text-slate-400"><RefreshCw className="mx-auto mb-2 h-6 w-6 animate-spin" />در حال دریافت سفارش‌ها…</div> : <>
-      <div className="grid gap-3 p-3 md:hidden">{orders.map((order) => <article key={order.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><div className="flex items-start justify-between gap-3"><div><span className="font-mono text-sm font-bold text-cyan-300">{order.orderNumber}</span><h3 className="mt-1 text-sm font-bold text-white">{order.storeName}</h3></div><span className="shrink-0 rounded-lg bg-slate-800 px-2 py-1 text-[11px]">{statusLabel(order.status)}</span></div><dl className="mt-4 grid grid-cols-2 gap-3 text-xs"><div><dt className="text-slate-500">تعداد اقلام</dt><dd className="mt-1 text-slate-200">{(order.items?.length || 0).toLocaleString("fa-IR")}</dd></div><div><dt className="text-slate-500">تاریخ تحویل</dt><dd className="mt-1 text-slate-200">{order.deliveryDate ? toJalaliDate(order.deliveryDate) : "بدون تاریخ"}</dd></div></dl><div className="mt-4 flex flex-wrap gap-2 border-t border-slate-800 pt-3">{orderActions(order)}</div></article>)}</div>
+      <div className="grid gap-3 p-3 md:hidden">{orders.map((order) => <article key={order.id} className="min-w-0 rounded-xl border border-slate-800 bg-slate-950/50 p-3 sm:p-4"><div className="flex min-w-0 items-start justify-between gap-3"><div className="min-w-0"><span className="block truncate font-mono text-sm font-bold text-cyan-300">{order.orderNumber}</span><h3 className="mt-1 break-words text-sm font-bold text-white">{order.storeName}</h3><p className="mt-1 text-[11px] text-slate-500">ثبت: {toJalaliDate(order.createdAt)}</p></div><span className="shrink-0 rounded-lg bg-slate-800 px-2 py-1 text-[11px]">{statusLabel(order.status)}</span></div><dl className="mt-4 grid grid-cols-2 gap-3 text-xs"><div><dt className="text-slate-500">تعداد اقلام</dt><dd className="mt-1 text-slate-200">{(order.items?.length || 0).toLocaleString("fa-IR")}</dd></div><div><dt className="text-slate-500">تاریخ تحویل</dt><dd className="mt-1 break-words text-slate-200">{order.deliveryDate ? toJalaliDate(order.deliveryDate) : "بدون تاریخ"}</dd></div></dl><div className="mt-4 flex flex-wrap gap-2 border-t border-slate-800 pt-3 [&>button]:flex-1 sm:[&>button]:flex-none">{orderActions(order)}</div></article>)}</div>
       <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[850px] text-xs"><thead className="bg-slate-900 text-slate-400"><tr><th className="p-3 text-right">شماره</th><th>فروشگاه</th><th>اقلام</th><th>تحویل</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody className="divide-y divide-slate-800">{orders.map((order) => <tr key={order.id}><td className="p-3 font-mono text-cyan-300">{order.orderNumber}</td><td>{order.storeName}</td><td>{order.items?.length || 0}</td><td>{order.deliveryDate ? toJalaliDate(order.deliveryDate) : "بدون تاریخ"}</td><td><span className="rounded-lg bg-slate-800 px-2 py-1">{statusLabel(order.status)}</span></td><td className="space-x-2 space-x-reverse">{orderActions(order)}</td></tr>)}</tbody></table></div></>}
-      {!loading && orders.length === 0 && <div className="p-10 text-center text-sm text-slate-500">سفارشی در این بازه وجود ندارد.</div>}
+      {!loading && orders.length === 0 && <div className="p-10 text-center text-sm text-slate-500">سفارش فعالی وجود ندارد.</div>}
     </div>
     {pagination.totalPages > 1 && <div className="flex justify-center gap-2"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border border-slate-700 px-3 py-2 disabled:opacity-40">قبلی</button><span className="p-2 text-xs text-slate-400">صفحه {page.toLocaleString("fa-IR")} از {pagination.totalPages.toLocaleString("fa-IR")}</span><button disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} className="rounded-lg border border-slate-700 px-3 py-2 disabled:opacity-40">بعدی</button></div>}
-    {showCreate && <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/80 p-4"><form onSubmit={submit} className="my-8 w-full max-w-3xl space-y-4 rounded-3xl border border-slate-800 bg-slate-950 p-5">
+    {showCreate && <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[90dvh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-3xl border border-slate-800 bg-slate-950 p-4 sm:p-5">
       <div className="flex items-center justify-between"><h3 className="flex items-center gap-2 font-bold"><ShoppingCart className="h-5 w-5 text-purple-400" />ثبت سفارش بدون اثر حسابداری</h3><button type="button" onClick={() => setShowCreate(false)} aria-label="بستن"><X className="h-5 w-5" /></button></div>
       <select required value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-900 p-3"><option value="">انتخاب مشتری / فروشگاه</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.storeName || customer.name}</option>)}</select>
       {form.items.map((item: any, index: number) => <div key={index} className="grid gap-2 rounded-xl border border-slate-800 p-3 sm:grid-cols-[1fr_120px_190px_auto]"><select required value={item.productId} onChange={(e) => { const product = products.find((p) => p.id === e.target.value); updateItem(index, { productId: e.target.value, unitPrice: Number(product?.basePrice || 0) }); }} className="rounded-lg bg-slate-900 p-2"><option value="">انتخاب محصول</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} — موجودی {product.stockQuantity}</option>)}</select><input type="number" min="0.0001" step="0.0001" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })} className="rounded-lg bg-slate-900 p-2" /><MoneyInput value={item.unitPrice} onChange={(unitPrice) => updateItem(index, { unitPrice })} unit="تومان" /><button type="button" disabled={form.items.length === 1} onClick={() => setForm({ ...form, items: form.items.filter((_: any, itemIndex: number) => itemIndex !== index) })} className="text-rose-400 disabled:opacity-30"><X className="h-4 w-4" /></button></div>)}

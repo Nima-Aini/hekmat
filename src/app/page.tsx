@@ -25,6 +25,7 @@ import { NotesView } from "@/components/views/NotesView";
 import { AuditLogsView } from "@/components/views/AuditLogsView";
 import { TaxDeclarationView } from "@/components/views/TaxDeclarationView";
 import { canManageAuditActions } from "@/lib/auditAuthorization";
+import type { OrderInvoiceDraft } from "@/lib/orderWorkflow";
 
 export default function HomePage() {
   const router = useRouter();
@@ -33,6 +34,7 @@ export default function HomePage() {
   useEffect(() => { fetch("/api/auth/employee-me").then((r) => r.json()).then((data) => { if (!data.success) router.replace("/employee-login"); else setMe(data); setAuthReady(true); }).catch(() => router.replace("/employee-login")); }, [router]);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [orderInvoiceDraft, setOrderInvoiceDraft] = useState<OrderInvoiceDraft | null>(null);
 
   const renderActiveView = () => {
     switch (activeTab) {
@@ -43,9 +45,9 @@ export default function HomePage() {
       case "products":
         return <ProductsView />;
       case "invoices":
-        return <InvoicesView selectedProjectId={selectedProjectId} />;
+        return <InvoicesView selectedProjectId={selectedProjectId} orderDraft={orderInvoiceDraft} onOrderDraftConsumed={() => setOrderInvoiceDraft(null)} />;
       case "orders":
-        return <OrdersView selectedProjectId={selectedProjectId} permissions={me?.navigationPermissions || me?.permissions} />;
+        return <OrdersView selectedProjectId={selectedProjectId} permissions={me?.navigationPermissions || me?.permissions} onPrepareInvoice={(draft) => { setOrderInvoiceDraft(draft); setActiveTab("invoices"); }} />;
       case "notes":
         return <NotesView selectedProjectId={selectedProjectId} permissions={me?.navigationPermissions || me?.permissions} />;
       case "audit_logs":

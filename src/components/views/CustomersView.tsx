@@ -23,9 +23,12 @@ import {
   CheckCircle2,
   AlertTriangle,
   History
+  ,Printer
+  ,Download
 } from "lucide-react";
 import { toJalaliDate, formatMoney, formatNumber } from "@/lib/dateUtils";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { downloadCustomerFinancialPdf, triggerCustomerFinancialPrint } from "@/lib/customerFinancialPrintHelper";
 
 export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({ selectedProjectId }) => {
   const [customers, setCustomers] = useState<any[]>([]);
@@ -41,6 +44,8 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
   const [viewingProfile, setViewingProfile] = useState<any | null>(null);
   const [customer360, setCustomer360] = useState<any | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [documentLoading, setDocumentLoading] = useState<"print" | "pdf" | "">("");
+  const [systemSettings, setSystemSettings] = useState<any>({});
   const [profileInvoicePage, setProfileInvoicePage] = useState(1);
   const [saving, setSaving] = useState(false);
   const getCustomerEmployeeName = (c: any) => {
@@ -84,18 +89,32 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [custRes, empRes] = await Promise.all([
+      const [custRes, empRes, settingsRes] = await Promise.all([
         fetch(`/api/customers?${new URLSearchParams({ page: String(customerPage), pageSize: "20", ...(selectedProjectId ? { projectId: selectedProjectId } : {}), ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}) })}`).then((r) => r.json()),
         fetch("/api/employees").then((r) => r.json()),
+        fetch("/api/settings").then((r) => r.json()),
       ]);
 
       if (custRes.success) { setCustomers(custRes.customers || []); setPagination(custRes.pagination || { page: 1, pageSize: 20, total: 0, totalPages: 0 }); }
       if (empRes.success) setEmployees(empRes.employees || []);
+      if (settingsRes.success) setSystemSettings(settingsRes.settings || {});
     } catch (err) {
       console.error("Error fetching customers:", err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFinancialDocument = async (kind: "print" | "pdf") => {
+    if (!viewingProfile) return;
+    setDocumentLoading(kind);
+    try {
+      const data = await fetch(`/api/customers/${viewingProfile.id}/360?document=1`).then((response) => response.json());
+      if (!data.success) throw new Error(data.error || "دریافت پرونده مالی ناموفق بود.");
+      if (kind === "print") await triggerCustomerFinancialPrint(data, systemSettings);
+      else await downloadCustomerFinancialPdf(data, systemSettings);
+    } catch (error) { alert(error instanceof Error ? error.message : "ساخت پرونده مالی ناموفق بود."); }
+    finally { setDocumentLoading(""); }
   };
 
   useEffect(() => {
@@ -584,27 +603,29 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
         <div
           role="dialog"
           aria-modal="true"
-          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
+          className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm sm:p-4"
         >
-          <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-5 my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-3">
+          <div className="customer-financial-modal flex max-h-[92dvh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-800 p-4 sm:p-5">
+              <div className="flex min-w-0 items-center gap-3">
                 <div className="h-10 w-10 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold">
                   <Building className="h-5 w-5" />
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">{viewingProfile.storeName || viewingProfile.name}</h3>
+                <div className="min-w-0">
+                  <h3 className="truncate text-base font-bold text-white">{viewingProfile.storeName || viewingProfile.name}</h3>
                   <p className="text-xs text-slate-400 font-mono">کد مشتری: {viewingProfile.code}</p>
                 </div>
               </div>
-              <button
+              <div className="flex shrink-0 items-center gap-1"><button disabled={Boolean(documentLoading)} onClick={() => handleFinancialDocument("print")} className="rounded-xl border border-slate-800 p-2 text-cyan-300" title="چاپ پرونده مالی"><Printer className="h-4 w-4" /></button><button disabled={Boolean(documentLoading)} onClick={() => handleFinancialDocument("pdf")} className="rounded-xl border border-slate-800 p-2 text-purple-300" title="دانلود PDF"><Download className="h-4 w-4" /></button><button
                 onClick={() => { setViewingProfile(null); setCustomer360(null); }}
                 className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:text-white hover:bg-slate-900 transition flex items-center gap-1 text-xs"
               >
                 <X className="h-4 w-4" />
-                <span>بستن</span>
-              </button>
+                <span className="hidden sm:inline">بستن</span>
+              </button></div>
             </div>
+
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
 
             {profileLoading && !customer360 ? <div className="rounded-2xl border border-slate-800 p-8 text-center text-xs text-slate-400"><RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin" />در حال ساخت پرونده ۳۶۰ مشتری…</div> : customer360 && <>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
@@ -654,7 +675,7 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-800 pt-3 sm:flex-row sm:items-center sm:justify-end">
               <button
                 onClick={() => {
                   const target = viewingProfile;
@@ -671,6 +692,7 @@ export const CustomersView: React.FC<{ selectedProjectId?: string | null }> = ({
               >
                 بستن
               </button>
+            </div>
             </div>
           </div>
         </div>

@@ -20,6 +20,7 @@ interface Props {
   required?: boolean;
   disabled?: boolean;
   className?: string;
+  compact?: boolean;
 }
 
 export const JalaliDatePicker: React.FC<Props> = ({
@@ -30,6 +31,7 @@ export const JalaliDatePicker: React.FC<Props> = ({
   required,
   disabled,
   className = "",
+  compact = false,
 }) => {
   const toJalaliStr = (v: string | number | Date | null | undefined): string => {
     if (!v) return "";
@@ -183,7 +185,7 @@ export const JalaliDatePicker: React.FC<Props> = ({
       )}
       {error ? (
         <span className="text-[11px] text-rose-400">{error}</span>
-      ) : text ? (
+      ) : text && !compact ? (
         <span className="text-[11px] text-slate-500">
           معادل میلادی: {(() => { const p = parseJalaliString(text); return p ? p.toISOString().slice(0,10) : "—"; })()}
         </span>

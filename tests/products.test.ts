@@ -142,11 +142,16 @@ describe("Production product lifecycle against PostgreSQL", () => {
     const product = await create();
     await database.update(products).set({ stockQuantity: "5" }).where(eq(products.id, product.id));
     const [customer] = await database.insert(customers).values({ code: randomUUID(), name: "مشتری سفارش", mobile: "09125550111" }).returning();
+    const [receiptAccount] = await database.insert(accounts).values({ code: randomUUID(), name: "حساب دریافت سفارش", type: "bank", balance: "0" }).returning();
     const order = await createOrder({ customerId: customer.id, requestKey: randomUUID(), requestHash: "stable", items: [{ productId: product.id, quantity: 2, unitPrice: 100 }] });
     expect(Number((await database.select().from(products).where(eq(products.id, product.id)))[0].stockQuantity)).toBe(5);
-    const invoice = await convertOrderToInvoice(order.id, "test-user");
+    const invoice = await convertOrderToInvoice(order.id, "test-user", { invoiceDate: new Date("2026-08-01T00:00:00Z"), invoiceDiscount: 10, items: [{ productId: product.id, quantity: 2, unitPrice: 100 }, { isCustom: true, productName: "هزینه ارسال", quantity: 1, unitPrice: 50 }], initialPayment: { amount: 40, accountId: receiptAccount.id, paymentMethod: "bank_transfer", referenceNumber: "TRACK-1" }, notes: "تکمیل سفارش در فرم فاکتور" });
     expect(Number((await database.select().from(products).where(eq(products.id, product.id)))[0].stockQuantity)).toBe(3);
     expect((await database.select().from(orders).where(eq(orders.id, order.id)))[0].convertedInvoiceId).toBe(invoice.id);
+    expect(Number(invoice.grandTotal)).toBe(240);
+    expect(Number(invoice.paidAmount)).toBe(40);
+    expect((await database.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id)))).toHaveLength(2);
+    expect(Number((await database.select().from(accounts).where(eq(accounts.id, receiptAccount.id)))[0].balance)).toBe(40);
     await expect(convertOrderToInvoice(order.id, "test-user")).rejects.toThrow(/قبلاً/);
 
     const [note] = await database.insert(tasks).values({ title: "پیگیری سفارش", description: "تست یادآوری", entityType: "note", status: "pending", dueDate: new Date() }).returning();

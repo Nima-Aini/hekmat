@@ -26,7 +26,7 @@ function jalaliDateToIso(value: string) {
 }
 
 const NumberCard = ({ title, value, money = true }: { title: string; value: number; money?: boolean }) => (
-  <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4"><span className="text-xs text-slate-400">{title}</span><strong className="mt-2 block font-mono text-lg text-cyan-300">{money ? formatMoney(value || 0) : formatNumber(value || 0)}</strong></div>
+  <div className="min-w-0 rounded-2xl border border-slate-800 bg-slate-950/60 p-3 sm:p-4"><span className="text-xs text-slate-400">{title}</span><strong className="mt-2 block break-words font-mono text-base text-cyan-300 sm:text-lg">{money ? formatMoney(value || 0) : formatNumber(value || 0)}</strong></div>
 );
 
 export function AdvancedReportsPanel({ selectedProjectId }: { selectedProjectId: string | null }) {

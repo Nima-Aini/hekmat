@@ -42,7 +42,14 @@ const VALUE_LABELS: Record<string, string> = {
 
 export function auditActionLabel(action?: string | null) {
   if (!action) return "عملیات ثبت‌شده";
-  return AUDIT_ACTION_LABELS[action] || action.replaceAll("_", " ").toLocaleLowerCase("fa-IR");
+  const normalized = action.toUpperCase();
+  if (AUDIT_ACTION_LABELS[normalized]) return AUDIT_ACTION_LABELS[normalized];
+  if (normalized.startsWith("UPDATE_") || normalized.startsWith("EDIT_")) return "ویرایش شد";
+  if (normalized.startsWith("REVERSE_")) return "ابطال شد";
+  if (normalized.startsWith("CANCEL_")) return "لغو شد";
+  if (normalized.startsWith("CREATE_")) return "ایجاد شد";
+  if (normalized.startsWith("DELETE_")) return "حذف شد";
+  return "عملیات ثبت‌شده";
 }
 
 export function auditEntityLabel(entityType?: string | null) {

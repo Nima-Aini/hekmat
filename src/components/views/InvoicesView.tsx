@@ -34,6 +34,7 @@ import {
   generateInvoiceHtml,
   triggerInvoicePrint,
 } from "@/lib/invoicePrintHelper";
+import type { OrderInvoiceDraft } from "@/lib/orderWorkflow";
 
 export interface InvoiceItemFormItem {
   productId?: string | null;
@@ -46,7 +47,7 @@ export interface InvoiceItemFormItem {
   discountAmount: number;
 }
 
-export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ selectedProjectId }) => {
+export const InvoicesView: React.FC<{ selectedProjectId: string | null; orderDraft?: OrderInvoiceDraft | null; onOrderDraftConsumed?: () => void }> = ({ selectedProjectId, orderDraft, onOrderDraftConsumed }) => {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
@@ -68,6 +69,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [sourceOrder, setSourceOrder] = useState<{ id: string; number: string } | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<any | null>(null);
   const [reversingInvoice, setReversingInvoice] = useState<any | null>(null);
   const [reversalReason, setReversalReason] = useState("");
@@ -114,6 +116,8 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     items: [] as InvoiceItemFormItem[],
     initialPaymentAmount: 0,
     initialPaymentAccountId: "",
+    initialPaymentMethod: "pos",
+    initialPaymentReference: "",
     initialPaymentDate: new Date() as Date | null,
     notes: "",
   });
@@ -277,14 +281,14 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
     return () => window.removeEventListener("akma:settings-updated", handleSettingsUpdate);
   }, [selectedProjectId, invoicePage, sortBy, sortOrder, searchQuery, statusFilter, paymentFilter]);
 
-  const loadProductsForProject = async (projId: string) => {
+  const loadProductsForProject = async (projId: string, repriceItems = true) => {
     try {
       const url = projId ? `/api/products?projectId=${projId}` : "/api/products";
       const res = await fetch(url).then((r) => r.json());
       if (res.success && res.products) {
         setProducts(res.products);
         // Automatically re-price existing items in the invoice form based on project overrides
-        setForm((prev) => {
+        if (repriceItems) setForm((prev) => {
           const updatedItems = prev.items.map((item) => {
             const matched = res.products.find((p: any) => p.id === item.productId);
             if (matched) {
@@ -318,6 +322,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
   };
 
   const openAddModal = () => {
+    setSourceOrder(null);
     const defaultProjId = selectedProjectId || (projects[0]?.id || "");
     const defaultCust = customers[0];
     const list = getFilteredProducts();
@@ -334,6 +339,8 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         : [],
       initialPaymentAmount: 0,
       initialPaymentAccountId: accounts[0]?.id || "",
+      initialPaymentMethod: "pos",
+      initialPaymentReference: "",
       initialPaymentDate: new Date(),
       notes: "",
     });
@@ -341,6 +348,42 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       loadProductsForProject(defaultProjId);
     }
     setIsAddModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!orderDraft) return;
+    setSourceOrder({ id: orderDraft.orderId, number: orderDraft.orderNumber });
+    setForm({
+      customerId: orderDraft.customerId,
+      projectId: orderDraft.projectId,
+      salesMode: orderDraft.employeeId ? "visitor" : "direct",
+      employeeId: orderDraft.employeeId,
+      invoiceDate: new Date(),
+      dueDate: null,
+      invoiceDiscount: 0,
+      items: orderDraft.items,
+      initialPaymentAmount: 0,
+      initialPaymentAccountId: accounts[0]?.id || "",
+      initialPaymentMethod: "pos",
+      initialPaymentReference: "",
+      initialPaymentDate: new Date(),
+      notes: orderDraft.notes,
+    });
+    if (orderDraft.projectId) void loadProductsForProject(orderDraft.projectId, false);
+    setIsAddModalOpen(true);
+    onOrderDraftConsumed?.();
+  }, [accounts, onOrderDraftConsumed, orderDraft]);
+
+  useEffect(() => {
+    if (isAddModalOpen && !form.initialPaymentAccountId && accounts[0]?.id) {
+      setForm((current) => ({ ...current, initialPaymentAccountId: accounts[0].id }));
+    }
+  }, [accounts, form.initialPaymentAccountId, isAddModalOpen]);
+
+  const closeAddModal = () => {
+    setIsAddModalOpen(false);
+    setSourceOrder(null);
+    createRequest.current = null;
   };
 
   const handleProductChange = (index: number, productId: string) => {
@@ -392,6 +435,10 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
       alert("لطفاً خریدار و حداقل یک قلم کالا را مشخص نمایید.");
       return;
     }
+    if (form.initialPaymentAmount > 0 && !form.initialPaymentAccountId) {
+      alert("برای پیش‌پرداخت، حساب دریافت را انتخاب کنید.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -408,7 +455,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           isCustom: Boolean(it.isCustom),
           productName: it.productName,
           customUnit: it.customUnit,
-          customNotes: undefined,
+          customNotes: it.customNotes,
           quantity: it.quantity,
           unitPrice: it.unitPrice,
           discountAmount: it.discountAmount || 0,
@@ -420,14 +467,15 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
         payload.initialPayment = {
           amount: form.initialPaymentAmount,
           accountId: form.initialPaymentAccountId,
-          paymentMethod: "pos",
+          paymentMethod: form.initialPaymentMethod,
+          referenceNumber: form.initialPaymentReference.trim() || undefined,
           paymentDate: form.initialPaymentDate ? form.initialPaymentDate.toISOString() : undefined,
         };
       }
 
       const serialized = JSON.stringify(payload);
       if (!createRequest.current || createRequest.current.payload !== serialized) createRequest.current = { payload: serialized, key: crypto.randomUUID() };
-      const res = await fetch("/api/invoices", {
+      const res = await fetch(sourceOrder ? `/api/orders/${sourceOrder.id}/convert` : "/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": createRequest.current!.key },
         body: JSON.stringify(payload),
@@ -435,7 +483,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
 
       if (res.success) {
         createRequest.current = null;
-        setIsAddModalOpen(false);
+        closeAddModal();
         await fetchData();
       } else {
         alert(res.error || "خطا در صدور فاکتور");
@@ -1051,18 +1099,19 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
           aria-modal="true"
           className="app-modal fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto"
         >
-          <div className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl space-y-6 my-8">
+          <div className="my-3 max-h-[92dvh] w-full max-w-4xl space-y-5 overflow-y-auto rounded-3xl border border-slate-800 bg-slate-950 p-4 shadow-2xl sm:my-8 sm:p-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <ShoppingBag className="h-5 w-5 text-purple-400" />
-                صدور فاکتور فروش رسمی جدید
+                {sourceOrder ? `تکمیل فاکتور سفارش ${sourceOrder.number}` : "صدور فاکتور فروش رسمی جدید"}
               </h3>
-              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={closeAddModal} className="shrink-0 text-slate-400 hover:text-white" aria-label="بستن">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <form onSubmit={handleCreateInvoice} className="space-y-6 text-xs">
+              {sourceOrder && <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/30 p-3 leading-6 text-cyan-100">اطلاعات سفارش منتقل شده است. سفارش فقط پس از صدور موفق فاکتور بسته می‌شود؛ تاریخ، تسویه، تخفیف و هزینه‌های تکمیلی را بررسی کنید.</div>}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
@@ -1070,6 +1119,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                   </label>
                   <select
                     required
+                    disabled={Boolean(sourceOrder)}
                     value={form.customerId}
                     onChange={(e) => handleCustomerSelect(e.target.value)}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-900 p-2.5 text-white"
@@ -1086,6 +1136,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                   <label className="block text-slate-300 font-semibold mb-1">پروژه و پلن قیمت‌گذاری</label>
                   <select
                     value={form.projectId}
+                    disabled={Boolean(sourceOrder)}
                     onChange={(e) => handleProjectSelect(e.target.value)}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-900 p-2.5 text-white"
                   >
@@ -1102,6 +1153,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                   <label className="block text-slate-300 font-semibold mb-1">ویزیتور / مسئول فروش</label>
                   <select
                     value={form.employeeId}
+                    disabled={Boolean(sourceOrder)}
                     onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-900 p-2.5 text-white"
                   >
@@ -1268,7 +1320,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                     <CreditCard className="h-4 w-4 text-emerald-400" />
                     تسویه اولیه و واریز نقدی (اختیاری)
                   </h4>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div>
                       <label className="block text-slate-400 mb-1">مبلغ پیش‌پرداخت</label>
                       <MoneyInput
@@ -1292,6 +1344,10 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                         ))}
                       </select>
                     </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div><label className="mb-1 block text-slate-400">روش پرداخت</label><select value={form.initialPaymentMethod} onChange={(e) => setForm({ ...form, initialPaymentMethod: e.target.value })} className="w-full rounded-xl border border-slate-800 bg-slate-950 p-2 text-white"><option value="pos">کارت‌خوان</option><option value="cash">نقدی</option><option value="card_transfer">کارت‌به‌کارت</option><option value="bank_transfer">واریز بانکی</option><option value="cheque">چک</option></select></div>
+                    <div><label className="mb-1 block text-slate-400">شماره پیگیری</label><input value={form.initialPaymentReference} onChange={(e) => setForm({ ...form, initialPaymentReference: e.target.value })} className="w-full rounded-xl border border-slate-800 bg-slate-950 p-2 text-base text-white sm:text-xs" /></div>
                   </div>
                   <JalaliDatePicker label="تاریخ واقعی پرداخت / تسویه" value={form.initialPaymentDate} onChange={(d) => setForm({ ...form, initialPaymentDate: d })} />
                 </div>
@@ -1322,10 +1378,10 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null }> = ({ s
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <div className="flex flex-col-reverse gap-3 border-t border-slate-800 pt-3 sm:flex-row sm:items-center sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={closeAddModal}
                   className="rounded-2xl border border-slate-800 px-5 py-2.5 text-slate-400 hover:text-white"
                 >
                   انصراف
