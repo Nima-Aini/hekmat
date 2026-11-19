@@ -80,7 +80,7 @@ export async function executeProductionBatch(input: CreateProductionBatchInput) 
       if (!material || material.status !== "active") throw new ApiError(409, "یکی از مواد اولیه فرمول غیرفعال یا حذف شده است.");
       locked.set(id, material);
     }
-    const { requirements: materialRequirements, shortages } = calculateProductionRequirements(recipes.map((r) => {
+    const recipeRows = recipes.map((r) => {
       const material = locked.get(r.rawMaterialId)!;
       return {
         rawMaterialId: r.rawMaterialId, rawMaterialName: material.name, code: material.code,
@@ -88,7 +88,11 @@ export async function executeProductionBatch(input: CreateProductionBatchInput) 
         quantityRequired: r.quantityRequired, wastagePercent: r.wastagePercent,
         unitCost: material.costPolicy === "average" ? Number(material.averageCost) || Number(material.currentCost) : Number(material.currentCost),
       };
-    }), batchQty);
+    });
+    let calculated: ReturnType<typeof calculateProductionRequirements>;
+    try { calculated = calculateProductionRequirements(recipeRows, batchQty); }
+    catch (error) { throw new ApiError(409, error instanceof Error ? error.message : "فرمول تولید نامعتبر است."); }
+    const { requirements: materialRequirements, shortages } = calculated;
     if (shortages.length) throw new RawMaterialShortageError(shortages);
 
     const batchNum = `BATCH-${Date.now().toString().slice(-8)}-${Math.floor(1000 + Math.random() * 9000)}`;
