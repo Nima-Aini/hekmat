@@ -360,7 +360,7 @@ export const InvoicesView: React.FC<{ selectedProjectId: string | null; orderDra
       employeeId: orderDraft.employeeId,
       invoiceDate: new Date(),
       dueDate: null,
-      invoiceDiscount: 0,
+      invoiceDiscount: orderDraft.invoiceDiscount,
       items: orderDraft.items,
       initialPaymentAmount: 0,
       initialPaymentAccountId: accounts[0]?.id || "",

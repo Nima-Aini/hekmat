@@ -36,12 +36,12 @@ describe("canonical invoice document", () => {
     const html = generateInvoiceHtml(invoiceWithItems(1));
     const documentRule = html.match(/\.invoice-document\s*\{([\s\S]*?)\}/)?.[1] || "";
 
-    expect(INVOICE_DOCUMENT_WIDTH).toBe(820);
+    expect(INVOICE_DOCUMENT_WIDTH).toBe(500);
     expect(INVOICE_JPG_SCALE).toBe(2);
-    expect(INVOICE_JPG_OUTPUT_WIDTH).toBe(1640);
-    expect(documentRule).toContain("width: 820px");
-    expect(documentRule).toContain("min-width: 820px");
-    expect(documentRule).toContain("max-width: 820px");
+    expect(INVOICE_JPG_OUTPUT_WIDTH).toBe(1000);
+    expect(documentRule).toContain("width: 500px");
+    expect(documentRule).toContain("min-width: 500px");
+    expect(documentRule).toContain("max-width: 500px");
     expect(documentRule).toContain("height: auto");
     expect(documentRule).toContain("overflow: visible");
     expect(html).not.toMatch(/@media\s*\(max-width:/);
@@ -58,7 +58,14 @@ describe("canonical invoice document", () => {
     expect(html).toContain("توضیح &lt;تست&gt;");
   });
 
-  it("prints only the store identity for the buyer", () => {
+  it("marks the shared template as a non-final proforma on A5 paper", () => {
+    const html = generateInvoiceHtml({ ...invoiceWithItems(1), documentType: "proforma" });
+    expect(html).toContain("size: A5 portrait");
+    expect(html).toContain("پیش‌فاکتور — غیرقطعی");
+    expect(html).not.toContain("مانده بدهی (طلب)");
+  });
+
+  it("prints buyer details when supplied", () => {
     const data = invoiceWithItems(1);
     data.invoice.customerName = "نام شخص مسئول";
     data.invoice.customerStore = "فروشگاه پاکیزه";
@@ -68,8 +75,8 @@ describe("canonical invoice document", () => {
     const html = generateInvoiceHtml(data);
     expect(html).toContain("فروشگاه پاکیزه");
     expect(html).not.toContain("نام شخص مسئول");
-    expect(html).not.toContain("09120000000");
-    expect(html).not.toContain("نشانی خصوصی مشتری");
+    expect(html).toContain("09120000000");
+    expect(html).toContain("نشانی خصوصی مشتری");
     expect(html).not.toContain("ویزیتور نمونه");
   });
 });

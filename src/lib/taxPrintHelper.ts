@@ -98,17 +98,17 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
     }
 
     .tax-sheet {
-      width: 210mm;
-      min-height: 297mm;
+      width: 148mm;
+      min-height: 210mm;
       margin: 0 auto;
-      padding: 12mm 15mm;
+      padding: 7mm;
       background: #ffffff;
       box-sizing: border-box;
     }
 
     @page {
-      size: A4 portrait;
-      margin: 8mm 10mm;
+      size: A5 portrait;
+      margin: 7mm;
     }
 
     @media print {
