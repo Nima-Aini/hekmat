@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { productionBatches, products, projects } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { executeProductionBatch } from "@/services/production";
+import { executeProductionBatch, RawMaterialShortageError } from "@/services/production";
+import { requestIdentity } from "@/lib/idempotency";
 
 export async function GET() {
   try {
@@ -37,7 +38,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await requirePermission("production.create");
+    const context = await requirePermission("production.create");
     const body = await req.json();
 
     if (!body.productId || !body.quantityToProduce) {
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
     }
 
     const created = await executeProductionBatch({
+      ...requestIdentity(req, context.employeeId, body),
       productId: body.productId,
       projectId: body.projectId || null,
       quantityToProduce: Number(body.quantityToProduce),
@@ -55,11 +57,11 @@ export async function POST(req: Request) {
       overheadCost: body.overheadCost ? Number(body.overheadCost) : 0,
       packagingCost: body.packagingCost ? Number(body.packagingCost) : 0,
       notes: body.notes,
-      allowInsufficientStock: body.allowInsufficientStock || false,
     });
 
     return NextResponse.json({ success: true, batch: created });
   } catch (error: any) {
+    if (error instanceof RawMaterialShortageError) return NextResponse.json({ success: false, code: error.code, error: error.message, shortages: error.shortages }, { status: 409 });
     return apiError(error);
   }
 }

@@ -7,11 +7,14 @@ import {
   rawMaterials,
   products,
 } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { recordInventoryTransaction } from "./inventory";
 import { logAuditEvent } from "./audit";
+import { calculateProductionRequirements } from "@/lib/productionRequirements";
 
 export interface CreateProductionBatchInput {
+  requestKey?: string;
+  requestHash?: string;
   productId: string;
   projectId?: string | null;
   quantityToProduce: number;
@@ -19,7 +22,13 @@ export interface CreateProductionBatchInput {
   overheadCost?: number;
   packagingCost?: number;
   notes?: string;
-  allowInsufficientStock?: boolean;
+}
+
+export class RawMaterialShortageError extends ApiError {
+  readonly code = "INSUFFICIENT_RAW_MATERIALS";
+  constructor(public shortages: ReturnType<typeof calculateProductionRequirements>["shortages"]) {
+    super(409, `موجودی ${shortages.length.toLocaleString("fa-IR")} ماده اولیه کافی نیست.`);
+  }
 }
 
 /**
@@ -29,6 +38,14 @@ export async function executeProductionBatch(input: CreateProductionBatchInput) 
   decimal(input.quantityToProduce, "مقدار تولید", 4, true);
   for (const amount of [input.laborCost, input.overheadCost, input.packagingCost]) decimal(amount ?? 0, "هزینه تولید");
   return await db.transaction(async (tx) => {
+    if (input.requestKey) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.requestKey}, 0))`);
+      const [prior] = await tx.select().from(productionBatches).where(eq(productionBatches.requestKey, input.requestKey)).limit(1);
+      if (prior) {
+        if (prior.requestHash !== input.requestHash) throw new ApiError(409, "این کلید درخواست قبلاً برای تولید دیگری استفاده شده است.");
+        return prior;
+      }
+    }
     const [product] = await tx.select().from(products).where(eq(products.id, input.productId)).limit(1);
     if (!product) throw new ApiError(404, "محصول مورد نظر یافت نشد.");
     if (product.status !== "active") throw new ApiError(409, "محصول غیرفعال قابل تولید نیست.");
@@ -50,41 +67,34 @@ export async function executeProductionBatch(input: CreateProductionBatchInput) 
       .where(eq(productRecipes.productId, input.productId));
 
     if (recipes.length === 0) {
-      throw new Error(`محصول "${product.name}" هیچ فرمول ساختی (BOM) تعریف شده ندارد.`);
+      throw new ApiError(409, `برای محصول «${product.name}» فرمول تولید تعریف نشده است.`);
     }
 
     const batchQty = input.quantityToProduce;
-    if (batchQty <= 0) throw new Error("مقدار تولید باید بزرگتر از صفر باشد.");
-
-    const materialRequirements = [];
-    for (const r of recipes) {
-      const qtyPerUnit = Number(r.quantityRequired) || 0;
-      const wastage = (Number(r.wastagePercent) || 0) / 100;
-      const totalQtyNeeded = Math.round(batchQty * qtyPerUnit * (1 + wastage) * 10000) / 10000;
-      const stockAvailable = Number(r.currentStock) || 0;
-
-      if (totalQtyNeeded > stockAvailable && !input.allowInsufficientStock) {
-        throw new Error(
-          `موجودی ماده اولیه "${r.rawMaterialName}" کافی نیست. مورد نیاز: ${totalQtyNeeded}، موجود در انبار: ${stockAvailable}.`
-        );
-      }
-
-      const unitCost = r.costPolicy === "average" ? Number(r.averageCost) || Number(r.unitCost) : Number(r.unitCost);
-      const lineCost = Math.round(totalQtyNeeded * unitCost * 100) / 100;
-
-      materialRequirements.push({
-        rawMaterialId: r.rawMaterialId,
-        rawMaterialName: r.rawMaterialName,
-        totalQtyNeeded,
-        unitCost,
-        lineCost,
-      });
+    // Lock every material in a stable order before checking stock. Concurrent batches
+    // then re-read the latest committed quantities under the same transaction.
+    const materialIds = [...new Set(recipes.map((r) => r.rawMaterialId))].sort();
+    const locked = new Map();
+    for (const id of materialIds) {
+      const [material] = await tx.select().from(rawMaterials).where(eq(rawMaterials.id, id)).for("update");
+      if (!material || material.status !== "active") throw new ApiError(409, "یکی از مواد اولیه فرمول غیرفعال یا حذف شده است.");
+      locked.set(id, material);
     }
+    const { requirements: materialRequirements, shortages } = calculateProductionRequirements(recipes.map((r) => {
+      const material = locked.get(r.rawMaterialId)!;
+      return {
+        rawMaterialId: r.rawMaterialId, rawMaterialName: material.name, code: material.code,
+        unit: material.unit, stock: material.stockQuantity,
+        quantityRequired: r.quantityRequired, wastagePercent: r.wastagePercent,
+        unitCost: material.costPolicy === "average" ? Number(material.averageCost) || Number(material.currentCost) : Number(material.currentCost),
+      };
+    }), batchQty);
+    if (shortages.length) throw new RawMaterialShortageError(shortages);
 
     const batchNum = `BATCH-${Date.now().toString().slice(-8)}-${Math.floor(1000 + Math.random() * 9000)}`;
     let totalMaterialCost = 0;
     for (const m of materialRequirements) {
-      totalMaterialCost += m.lineCost;
+      totalMaterialCost += Math.round(Number(m.required) * m.unitCost * 100) / 100;
     }
 
     const laborCost = input.laborCost || 0;
@@ -101,6 +111,8 @@ export async function executeProductionBatch(input: CreateProductionBatchInput) 
     const [createdBatch] = await tx
       .insert(productionBatches)
       .values({
+        requestKey: input.requestKey,
+        requestHash: input.requestHash,
         batchNumber: batchNum,
         productId: input.productId,
         projectId: input.projectId || null,
@@ -120,29 +132,28 @@ export async function executeProductionBatch(input: CreateProductionBatchInput) 
       try {
         await tx.insert(productionBatchItems).values({
           batchId: createdBatch.id,
-          rawMaterialId: m.rawMaterialId,
-          quantityConsumed: m.totalQtyNeeded.toString(),
+          rawMaterialId: m.materialId,
+          quantityConsumed: m.required,
           unitCostSnapshot: m.unitCost.toString(),
-          totalCostSnapshot: m.lineCost.toString(),
+          totalCostSnapshot: (Math.round(Number(m.required) * m.unitCost * 100) / 100).toString(),
           wasteQuantity: "0",
         });
       } catch (insertErr: any) {
         console.error("Batch item insert error:", insertErr);
-        throw new Error(`خطا در ثبت ردیف ماده اولیه "${m.rawMaterialName}": ${insertErr.message}`);
+        throw insertErr;
       }
 
       await recordInventoryTransaction(
         {
           itemType: "raw_material",
-          itemId: m.rawMaterialId,
+          itemId: m.materialId,
           transactionType: "production_input",
-          quantityChange: -m.totalQtyNeeded,
+          quantityChange: -Number(m.required),
           unitCostSnapshot: m.unitCost,
           referenceType: "production_batch",
           referenceId: createdBatch.id,
           projectId: input.projectId || null,
           notes: `مصرف در بچ تولید #${batchNum}`,
-          allowNegativeStock: input.allowInsufficientStock,
         },
         tx
       );
@@ -177,7 +188,7 @@ export async function executeProductionBatch(input: CreateProductionBatchInput) 
       quantityProduced: batchQty,
       totalBatchCost,
       unitCost,
-    });
+    }, undefined, tx);
 
     return createdBatch;
   });

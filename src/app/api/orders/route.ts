@@ -30,7 +30,7 @@ export async function GET(req: Request) {
     const where = and(...conditions);
     const sort = searchParams.get("sortOrder") === "asc" ? asc(orders.createdAt) : desc(orders.createdAt);
     const [rows, [totalRow]] = await Promise.all([
-      db.select({ order: orders, customerName: customers.name, storeName: customers.storeName, projectName: projects.name, employeeName: employees.name })
+      db.select({ order: orders, customerName: customers.name, storeName: customers.storeName, customerMobile: customers.mobile, customerAddress: customers.address, projectName: projects.name, employeeName: employees.name })
         .from(orders).innerJoin(customers, eq(orders.customerId, customers.id)).leftJoin(projects, eq(orders.projectId, projects.id)).leftJoin(employees, eq(orders.employeeId, employees.id))
         .where(where).orderBy(sort).limit(pageSize).offset((page - 1) * pageSize),
       db.select({ total: count() }).from(orders).innerJoin(customers, eq(orders.customerId, customers.id)).where(where),
@@ -49,6 +49,8 @@ export async function POST(req: Request) {
     if (!body.customerId) throw new ApiError(400, "انتخاب مشتری الزامی است.");
     const deliveryDate = body.deliveryDate ? new Date(body.deliveryDate) : null;
     if (deliveryDate && Number.isNaN(deliveryDate.getTime())) throw new ApiError(400, "تاریخ تحویل نامعتبر است.");
+    const validUntil = body.validUntil ? new Date(body.validUntil) : null;
+    if (validUntil && Number.isNaN(validUntil.getTime())) throw new ApiError(400, "تاریخ اعتبار نامعتبر است.");
     const manager = context.permissions.has("*") || context.permissions.has("orders.manage");
     let employeeId = manager ? (body.employeeId || null) : context.employeeId;
     if (!manager) {
@@ -57,7 +59,7 @@ export async function POST(req: Request) {
       employeeId = context.employeeId;
     }
     const identity = requestIdentity(req, context.employeeId, body);
-    const order = await createOrder({ ...identity, customerId: body.customerId, projectId: body.projectId || null, employeeId, deliveryDate, notes: body.notes, items: body.items, createdById: context.employeeId });
+    const order = await createOrder({ ...identity, customerId: body.customerId, projectId: body.projectId || null, employeeId, deliveryDate, validUntil, deliveryAddress: body.deliveryAddress, paymentTerms: body.paymentTerms, invoiceDiscount: body.invoiceDiscount, notes: body.notes, items: body.items, createdById: context.employeeId });
     return NextResponse.json({ success: true, order }, { status: 201 });
   } catch (error) { return apiError(error); }
 }

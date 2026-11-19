@@ -2,7 +2,7 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { formatMoney, toJalaliDate } from "@/lib/dateUtils";
 
-export const CUSTOMER_FINANCIAL_DOCUMENT_WIDTH = 820;
+export const CUSTOMER_FINANCIAL_DOCUMENT_WIDTH = 500;
 const esc = (value: unknown) => String(value ?? "—").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
 const paymentLabel = (value: string) => ({ cash: "نقدی", pos: "کارت‌خوان", card_transfer: "کارت‌به‌کارت", bank_transfer: "واریز بانکی", cheque: "چک" }[value] || value || "—");
 const row = (cells: unknown[]) => `<tr>${cells.map((cell) => `<td>${esc(cell)}</td>`).join("")}</tr>`;
@@ -11,7 +11,7 @@ export function generateCustomerFinancialHtml(data: any, settings: any = {}) {
   const customer = data.customer || {}, summary = data.summary || {}, invoices = data.invoices || [], payments = data.payments || [];
   const debts = data.debts || invoices.filter((invoice: any) => Number(invoice.balanceDue) > 0);
   return `<!doctype html><html dir="rtl" lang="fa"><head><meta charset="utf-8"><style>
-  @page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#0f172a;font-family:Tahoma,Arial,sans-serif}.customer-financial-document{width:${CUSTOMER_FINANCIAL_DOCUMENT_WIDTH}px;min-width:${CUSTOMER_FINANCIAL_DOCUMENT_WIDTH}px;max-width:${CUSTOMER_FINANCIAL_DOCUMENT_WIDTH}px;height:auto;margin:0 auto;padding:18px;border:2px solid #0f172a;background:#fff}.head{display:flex;justify-content:space-between;gap:20px;border-bottom:2px solid #0f172a;padding-bottom:12px}.title{font-size:20px;font-weight:900}.muted{color:#475569;font-size:11px}.meta{text-align:left;font-size:11px}.summary{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:12px 0}.box{border:1px solid #94a3b8;border-radius:8px;padding:8px}.box b{display:block;margin-top:5px;font-size:12px}.section{margin-top:13px;border:1px solid #64748b;border-radius:8px;overflow:hidden}.section h2{margin:0;background:#e2e8f0;padding:8px;font-size:12px}table{width:100%;border-collapse:collapse;font-size:10px}thead{display:table-header-group;background:#f1f5f9}th,td{padding:7px;border-top:1px solid #cbd5e1;text-align:right}tr{break-inside:avoid}.empty{padding:14px;text-align:center;color:#64748b;font-size:11px}@media print{body{width:auto}.customer-financial-document{border:0;padding:0}}
+  @page{size:A5 portrait;margin:7mm}*{box-sizing:border-box}body{margin:0;background:#fff;color:#0f172a;font-family:Tahoma,Arial,sans-serif}.customer-financial-document{width:${CUSTOMER_FINANCIAL_DOCUMENT_WIDTH}px;min-width:${CUSTOMER_FINANCIAL_DOCUMENT_WIDTH}px;max-width:${CUSTOMER_FINANCIAL_DOCUMENT_WIDTH}px;height:auto;margin:0 auto;padding:10px;border:2px solid #0f172a;background:#fff}.head{display:flex;justify-content:space-between;gap:20px;border-bottom:2px solid #0f172a;padding-bottom:12px}.title{font-size:20px;font-weight:900}.muted{color:#475569;font-size:11px}.meta{text-align:left;font-size:11px}.summary{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin:12px 0}.box{border:1px solid #94a3b8;border-radius:8px;padding:5px}.box b{display:block;margin-top:5px;font-size:12px}.section{margin-top:13px;border:1px solid #64748b;border-radius:8px;overflow:hidden}.section h2{margin:0;background:#e2e8f0;padding:8px;font-size:12px}table{width:100%;border-collapse:collapse;font-size:10px}thead{display:table-header-group;background:#f1f5f9}th,td{padding:4px;border-top:1px solid #cbd5e1;text-align:right}tr{break-inside:avoid}.empty{padding:14px;text-align:center;color:#64748b;font-size:11px}@media print{body{width:auto}.customer-financial-document{width:100%;min-width:0;max-width:100%;border:0;padding:0}.section{break-inside:auto}thead{display:table-header-group}tr,.box{break-inside:avoid}}
   </style></head><body><main class="customer-financial-document"><header class="head"><div><div class="title">${esc(settings.companyName || settings.organizationName || "حکمت اکما")}</div><div class="muted">پرونده مالی رسمی مشتری</div><div class="muted">${esc(settings.address || "")}</div></div><div class="meta"><b>${esc(customer.storeName || customer.name)}</b><br>کد: ${esc(customer.code)}<br>تاریخ گزارش: ${esc(toJalaliDate(new Date()))}</div></header>
   <section class="summary">${[["کل خرید",summary.totalSales],["تعداد فاکتور",Number(summary.invoiceCount||0).toLocaleString("fa-IR")],["کل پرداخت",summary.totalPaid],["بدهی",summary.outstanding],["مانده حساب",summary.outstanding]].map(([label,value], index)=>`<div class="box"><span class="muted">${label}</span><b>${index===1?value:formatMoney(Number(value||0))}</b></div>`).join("")}</section>
   <section class="section"><h2>فاکتورها</h2>${invoices.length?`<table><thead><tr><th>شماره</th><th>تاریخ</th><th>مبلغ</th><th>پرداخت</th><th>مانده</th></tr></thead><tbody>${invoices.map((i:any)=>row([i.invoiceNumber,toJalaliDate(i.invoiceDate),formatMoney(i.grandTotal),formatMoney(i.paidAmount),formatMoney(i.balanceDue)])).join("")}</tbody></table>`:`<div class="empty">فاکتوری ثبت نشده است.</div>`}</section>
@@ -21,4 +21,32 @@ export function generateCustomerFinancialHtml(data: any, settings: any = {}) {
 
 function createFrame(html: string) { const frame = document.createElement("iframe"); frame.style.cssText = `position:fixed;right:-10000px;top:0;width:${CUSTOMER_FINANCIAL_DOCUMENT_WIDTH}px;height:1px;border:0`; document.body.appendChild(frame); frame.contentDocument!.open(); frame.contentDocument!.write(html); frame.contentDocument!.close(); return frame; }
 export async function triggerCustomerFinancialPrint(data: any, settings?: any) { const frame = createFrame(generateCustomerFinancialHtml(data, settings)); await frame.contentDocument?.fonts?.ready; frame.contentWindow?.focus(); frame.contentWindow?.print(); window.setTimeout(() => frame.remove(), 1500); }
-export async function downloadCustomerFinancialPdf(data: any, settings?: any) { const frame = createFrame(generateCustomerFinancialHtml(data, settings)); await frame.contentDocument?.fonts?.ready; const element = frame.contentDocument!.querySelector(".customer-financial-document") as HTMLElement; const canvas = await html2canvas(element, { scale: 2, backgroundColor: "#ffffff", width: CUSTOMER_FINANCIAL_DOCUMENT_WIDTH, windowWidth: CUSTOMER_FINANCIAL_DOCUMENT_WIDTH, height: element.scrollHeight, windowHeight: element.scrollHeight }); const pdf = new jsPDF("p", "mm", "a4"), pageWidth = 210, pageHeight = 297, imageHeight = canvas.height * pageWidth / canvas.width, image = canvas.toDataURL("image/jpeg", 0.96); let position = 0; pdf.addImage(image, "JPEG", 0, position, pageWidth, imageHeight); while (imageHeight + position > pageHeight) { position -= pageHeight; pdf.addPage(); pdf.addImage(image, "JPEG", 0, position, pageWidth, imageHeight); } pdf.save(`customer-financial-${String(data.customer?.code || "report")}.pdf`); frame.remove(); }
+export async function downloadCustomerFinancialPdf(data: any, settings?: any) {
+  const frame = createFrame(generateCustomerFinancialHtml(data, settings));
+  try {
+    await frame.contentDocument?.fonts?.ready;
+    const element = frame.contentDocument!.querySelector(".customer-financial-document") as HTMLElement;
+    const pageWidth = 134, pageHeight = 196;
+    const canvas = await html2canvas(element, { scale: 2, backgroundColor: "#ffffff", width: CUSTOMER_FINANCIAL_DOCUMENT_WIDTH, windowWidth: CUSTOMER_FINANCIAL_DOCUMENT_WIDTH, height: element.scrollHeight, windowHeight: element.scrollHeight });
+    const pdf = new jsPDF("p", "mm", "a5");
+    const scale = canvas.width / element.getBoundingClientRect().width;
+    const maxPagePixels = Math.floor(canvas.width * pageHeight / pageWidth);
+    const elementTop = element.getBoundingClientRect().top;
+    const safeBreaks = [...element.querySelectorAll("tr, .section, .box, .head, .summary")]
+      .flatMap((node) => [node.getBoundingClientRect().top, node.getBoundingClientRect().bottom])
+      .map((y) => Math.round((y - elementTop) * scale)).filter((y) => y > 0 && y < canvas.height).sort((a, b) => a - b);
+    let top = 0;
+    while (top < canvas.height) {
+      const limit = Math.min(canvas.height, top + maxPagePixels);
+      const candidates = safeBreaks.filter((y) => y > top + maxPagePixels * 0.45 && y <= limit);
+      const bottom = limit === canvas.height ? limit : candidates.at(-1) ?? limit;
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width; slice.height = bottom - top;
+      slice.getContext("2d")!.drawImage(canvas, 0, top, canvas.width, slice.height, 0, 0, canvas.width, slice.height);
+      if (top) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", 0.96), "JPEG", 7, 7, pageWidth, slice.height * pageWidth / canvas.width);
+      top = bottom;
+    }
+    pdf.save(`customer-financial-${String(data.customer?.code || "report")}.pdf`);
+  } finally { frame.remove(); }
+}
