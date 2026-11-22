@@ -45,6 +45,7 @@ jobs:
           google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/proforma-long.pdf" "file://$PRINT_SAMPLE_DIR/proforma-long.html"
           google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/invoice-short.pdf" "file://$PRINT_SAMPLE_DIR/invoice-short.html"
           google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/customer-financial.pdf" "file://$PRINT_SAMPLE_DIR/customer-financial.html"
+          google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/tax-declaration.pdf" "file://$PRINT_SAMPLE_DIR/tax-declaration.html"
           for pdf in "$PRINT_SAMPLE_DIR"/*.pdf; do
             pdfinfo "$pdf" | grep -E 'Pages:|Page size:'
             pdfinfo "$pdf" | grep -Fq 'pts (A5)'

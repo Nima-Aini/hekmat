@@ -430,6 +430,44 @@ export function generateTaxDeclarationHtml(data: TaxDeclarationPrintData): strin
 </html>`;
 }
 
+export async function downloadTaxDeclarationPdf(data: TaxDeclarationPrintData): Promise<void> {
+  const [{ default: html2canvas }, { default: JsPdf }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  const frame = document.createElement("iframe");
+  frame.style.cssText = "position:fixed;right:-10000px;top:0;width:560px;height:1px;border:0";
+  const loaded = new Promise<void>((resolve, reject) => { frame.onload = () => resolve(); frame.onerror = () => reject(new Error("بارگذاری گزارش مالیاتی ناموفق بود.")); });
+  frame.srcdoc = generateTaxDeclarationHtml(data);
+  document.body.appendChild(frame);
+  try {
+    await loaded;
+    await frame.contentDocument!.fonts?.ready;
+    const element = frame.contentDocument!.querySelector(".tax-sheet") as HTMLElement;
+    if (!element) throw new Error("قالب گزارش مالیاتی یافت نشد.");
+    const height = element.scrollHeight;
+    frame.style.height = `${height}px`;
+    const canvas = await html2canvas(element, { scale: 2, backgroundColor: "#fff", width: element.offsetWidth, height, windowWidth: 560, windowHeight: height });
+    const pdf = new JsPdf("p", "mm", "a5");
+    const pageWidth = 148, pageHeight = 210;
+    const maxPixels = Math.floor(canvas.width * pageHeight / pageWidth);
+    const scale = canvas.width / element.getBoundingClientRect().width;
+    const top = element.getBoundingClientRect().top;
+    const breaks = [...element.querySelectorAll("tr, .header-box, .summary-box")]
+      .flatMap((node) => [node.getBoundingClientRect().top, node.getBoundingClientRect().bottom])
+      .map((y) => Math.round((y - top) * scale)).filter((y) => y > 0 && y < canvas.height).sort((a, b) => a - b);
+    let start = 0;
+    while (start < canvas.height) {
+      const limit = Math.min(canvas.height, start + maxPixels);
+      const candidates = breaks.filter((point) => point > start + maxPixels * .4 && point <= limit);
+      const end = limit === canvas.height ? limit : candidates.at(-1) ?? limit;
+      const slice = document.createElement("canvas"); slice.width = canvas.width; slice.height = end - start;
+      slice.getContext("2d")!.drawImage(canvas, 0, start, canvas.width, slice.height, 0, 0, canvas.width, slice.height);
+      if (start) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", .95), "JPEG", 0, 0, pageWidth, slice.height * pageWidth / canvas.width);
+      start = end;
+    }
+    pdf.save(`Tax_Declaration_${data.period.jalaliStart}_to_${data.period.jalaliEnd}.pdf`);
+  } finally { frame.remove(); }
+}
+
 export function triggerTaxDeclarationPrint(data: TaxDeclarationPrintData): void {
   const html = generateTaxDeclarationHtml(data);
 

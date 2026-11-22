@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { NeonBadge } from "@/components/ui/NeonBadge";
 import {
   TrendingUp,
@@ -47,9 +47,7 @@ import {
   toLatinDigits,
 } from "@/lib/dateUtils";
 import { numberToPersianWords } from "@/lib/numberToWords";
-import { triggerTaxDeclarationPrint } from "@/lib/taxPrintHelper";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
+import { triggerTaxDeclarationPrint, downloadTaxDeclarationPdf, type TaxDeclarationPrintData } from "@/lib/taxPrintHelper";
 import { AdvancedReportsPanel } from "@/components/views/AdvancedReportsPanel";
 import { AnalyticsTab, ReportsAnalyticsOverview } from "@/components/views/ReportsAnalyticsOverview";
 import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
@@ -104,7 +102,6 @@ export const ReportsView: React.FC<{
   });
   const [taxDateError, setTaxDateError] = useState("");
   const [generatingPdf, setGeneratingPdf] = useState(false);
-  const taxDocRef = useRef<HTMLDivElement>(null);
   const docTrackingNumber = `PREP-${taxStartDate}-${taxEndDate}`;
   const [docCreationDate] = useState(() => toJalaliDate(new Date()));
 
@@ -319,36 +316,9 @@ export const ReportsView: React.FC<{
     setTaxEndDate(e);
   };
 
-  const handleDownloadTaxPdf = async () => {
-    if (!taxDocRef.current) return;
-    setGeneratingPdf(true);
-    try {
-      const element = taxDocRef.current;
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: "#ffffff",
-      });
-
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
-      const filename = `Tax_Declaration_${taxStartDate}_to_${taxEndDate}.pdf`;
-      pdf.save(filename);
-    } catch (err: any) {
-      alert("خطا در تولید فایل PDF: " + err.message);
-    } finally {
-      setGeneratingPdf(false);
-    }
-  };
-
-  const handlePrintTaxDoc = () => {
-    if (!taxData) return;
-    triggerTaxDeclarationPrint({
+  const taxPrintData = (): TaxDeclarationPrintData | null => {
+    if (!taxData) return null;
+    return {
       taxpayer: taxData.taxpayer || {
         businessName: "شرکت مهندسی و بازرگانی حکمت اکما",
       },
@@ -379,7 +349,21 @@ export const ReportsView: React.FC<{
       },
       trackingNumber: docTrackingNumber,
       creationDate: docCreationDate,
-    });
+    };
+  };
+
+  const handleDownloadTaxPdf = async () => {
+    const data = taxPrintData();
+    if (!data) return;
+    setGeneratingPdf(true);
+    try { await downloadTaxDeclarationPdf(data); }
+    catch (err: any) { alert("خطا در تولید فایل PDF: " + err.message); }
+    finally { setGeneratingPdf(false); }
+  };
+
+  const handlePrintTaxDoc = () => {
+    const data = taxPrintData();
+    if (data) triggerTaxDeclarationPrint(data);
   };
 
   const handleRunInflationSim = async () => {
@@ -581,10 +565,9 @@ export const ReportsView: React.FC<{
             </div>
           ) : (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 overflow-x-auto">
-              {/* PRINTABLE TAX DECLARATION PAPER (A4 Layout) */}
+              {/* PRINTABLE TAX DECLARATION PAPER (A5 Layout) */}
               <div
-                ref={taxDocRef}
-                className="mx-auto w-[210mm] min-h-[297mm] bg-white text-slate-900 p-8 shadow-2xl rounded-sm text-right font-sans border border-slate-300"
+                className="mx-auto w-[148mm] min-h-[210mm] bg-white text-slate-900 p-5 shadow-2xl rounded-sm text-right font-sans border border-slate-300"
                 style={{ direction: "rtl", color: "#0f172a" }}
               >
                 {/* Internal preparation report header; not a government form. */}

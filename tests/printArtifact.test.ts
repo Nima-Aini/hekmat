@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { generateInvoiceHtml, type PrintableInvoiceData } from "../src/lib/invoicePrintHelper";
 import { generateCustomerFinancialHtml } from "../src/lib/customerFinancialPrintHelper";
+import { generateTaxDeclarationHtml } from "../src/lib/taxPrintHelper";
 
 describe.skipIf(!process.env.PRINT_SAMPLE_DIR)("A5 print samples", () => {
   it("exports short invoice, long proforma and customer financial documents", () => {
@@ -20,5 +21,12 @@ describe.skipIf(!process.env.PRINT_SAMPLE_DIR)("A5 print samples", () => {
     writeFileSync(join(folder, "invoice-short.html"), short);
     writeFileSync(join(folder, "proforma-long.html"), long);
     writeFileSync(join(folder, "customer-financial.html"), financial);
+    const tax = generateTaxDeclarationHtml({
+      taxpayer: { businessName: "حکمت اکما" },
+      statement: { invoiceCount: 2, expenseCount: 1, grossSales: 1000000, totalDiscounts: 0, netSalesRevenue: 1000000, totalCogs: 250000, grossProfit: 750000, totalExpenses: 100000, totalCommissions: 0, totalAllowableDeductions: 100000, taxableOperatingProfit: 650000, corporateTaxAmount: 162500, corporateTaxRate: 25, calculatedVat: 0, vatRate: 0, netRetainedProfit: 487500 },
+      period: { jalaliStart: "۱۴۰۵/۰۱/۰۱", jalaliEnd: "۱۴۰۵/۱۲/۲۹" }, trackingNumber: "TEST-1", creationDate: "۱۴۰۵/۰۹/۰۱",
+    });
+    expect(tax).toContain("A5 portrait");
+    writeFileSync(join(folder, "tax-declaration.html"), tax);
   });
 });
