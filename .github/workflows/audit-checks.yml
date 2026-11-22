@@ -46,9 +46,11 @@ jobs:
           google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/invoice-short.pdf" "file://$PRINT_SAMPLE_DIR/invoice-short.html"
           google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/customer-financial.pdf" "file://$PRINT_SAMPLE_DIR/customer-financial.html"
           for pdf in "$PRINT_SAMPLE_DIR"/*.pdf; do
-            pdfinfo "$pdf" | grep -q 'Page size: *419.* x 595.* pts (A5)'
+            pdfinfo "$pdf" | grep -E 'Pages:|Page size:'
+            pdfinfo "$pdf" | grep -Fq 'pts (A5)'
           done
           test "$(pdfinfo "$PRINT_SAMPLE_DIR/proforma-long.pdf" | awk '/Pages:/ {print $2}')" -gt 1
+          test "$(pdfinfo "$PRINT_SAMPLE_DIR/invoice-short.pdf" | awk '/Pages:/ {print $2}')" -eq 1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

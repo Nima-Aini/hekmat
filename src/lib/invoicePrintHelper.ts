@@ -99,17 +99,17 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
     .map(
       (item, idx) => `
     <tr data-invoice-item-row style="border-bottom: 1px solid #cbd5e1;">
-      <td style="padding: 7px 6px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${idx + 1}</td>
-      <td style="padding: 7px 8px; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a; text-align: right;">
+      <td style="padding: 5px 3px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${idx + 1}</td>
+      <td style="padding: 5px 4px; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a; text-align: right; overflow-wrap: anywhere;">
         ${escapeHtml(item.productNameSnapshot)}
         ${item.productCode ? `<span style="font-size: 10px; color: #475569; margin-right: 4px;">[${escapeHtml(item.productCode)}]</span>` : ""}
         ${item.customNotes ? `<div style="font-size: 10px; color: #64748b; margin-top: 2px; font-weight: normal;">${escapeHtml(item.customNotes)}</div>` : ""}
       </td>
-      <td style="padding: 7px 6px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${formatNumber(item.quantity)}</td>
-      <td style="padding: 7px 6px; text-align: center; border-left: 1px solid #cbd5e1; color: #0f172a;">${escapeHtml(item.productUnit || "عدد")}</td>
-      <td style="padding: 7px 8px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.unitPrice, "")}</td>
-      <td style="padding: 7px 8px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.discountAmount || 0, "")}</td>
-      <td style="padding: 7px 8px; text-align: left; font-weight: bold; color: #0f172a;">${formatMoney(item.lineTotal, "")}</td>
+      <td style="padding: 5px 3px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${formatNumber(item.quantity)}</td>
+      <td style="padding: 5px 3px; text-align: center; border-left: 1px solid #cbd5e1; color: #0f172a;">${escapeHtml(item.productUnit || "عدد")}</td>
+      <td style="padding: 5px 3px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.unitPrice, "")}</td>
+      <td style="padding: 5px 3px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.discountAmount || 0, "")}</td>
+      <td style="padding: 5px 3px; text-align: left; font-weight: bold; color: #0f172a;">${formatMoney(item.lineTotal, "")}</td>
     </tr>
   `
     )
@@ -213,7 +213,8 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 11px;
+      table-layout: fixed;
+      font-size: 10px;
     }
     thead {
       background-color: #e2e8f0;
@@ -231,6 +232,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       grid-template-columns: 1fr 1fr;
       gap: 12px;
       margin-bottom: 16px;
+      break-inside: avoid;
     }
     .words-box {
       border: 1px solid #cbd5e1;
@@ -273,6 +275,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       padding-top: 16px;
       text-align: center;
       margin-top: 10px;
+      break-inside: avoid;
     }
     .sign-line {
       height: 45px;
@@ -350,13 +353,13 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       <table>
         <thead>
           <tr>
-            <th style="width: 40px; text-align: center; border-left: 1px solid #64748b;">ردیف</th>
+            <th style="width: 25px; text-align: center; border-left: 1px solid #64748b;">ردیف</th>
             <th style="border-left: 1px solid #64748b;">شرح کالا یا خدمات</th>
-            <th style="width: 55px; text-align: center; border-left: 1px solid #64748b;">تعداد</th>
-            <th style="width: 50px; text-align: center; border-left: 1px solid #64748b;">واحد</th>
-            <th style="width: 100px; text-align: left; border-left: 1px solid #64748b;">مبلغ واحد (تومان)</th>
-            <th style="width: 90px; text-align: left; border-left: 1px solid #64748b;">تخفیف (تومان)</th>
-            <th style="width: 110px; text-align: left;">مبلغ کل (تومان)</th>
+            <th style="width: 40px; text-align: center; border-left: 1px solid #64748b;">تعداد</th>
+            <th style="width: 34px; text-align: center; border-left: 1px solid #64748b;">واحد</th>
+            <th style="width: 72px; text-align: left; border-left: 1px solid #64748b;">مبلغ واحد</th>
+            <th style="width: 62px; text-align: left; border-left: 1px solid #64748b;">تخفیف</th>
+            <th style="width: 78px; text-align: left;">مبلغ کل (تومان)</th>
           </tr>
         </thead>
         <tbody>
