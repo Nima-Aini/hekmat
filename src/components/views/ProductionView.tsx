@@ -18,6 +18,8 @@ import { toJalaliDate, formatMoney, formatNumber, formatRial } from "@/lib/dateU
 import { parsePersianError } from "@/lib/errorUtils";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 
+type MaterialShortage = { materialId: string; materialName: string; code: string; unit: string; required: string; available: string; shortage: string };
+
 export const ProductionView: React.FC<{ selectedProjectId: string | null }> = ({ selectedProjectId }) => {
   const [batches, setBatches] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -27,7 +29,9 @@ export const ProductionView: React.FC<{ selectedProjectId: string | null }> = ({
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [shortages, setShortages] = useState<MaterialShortage[]>([]);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   const [form, setForm] = useState({
@@ -80,6 +84,8 @@ export const ProductionView: React.FC<{ selectedProjectId: string | null }> = ({
       notes: "",
     });
     setErrorMessage(null);
+    setShortages([]);
+    setRequestKey(crypto.randomUUID());
     setIsModalOpen(true);
   };
 
@@ -92,10 +98,11 @@ export const ProductionView: React.FC<{ selectedProjectId: string | null }> = ({
 
     setSaving(true);
     setErrorMessage(null);
+    setShortages([]);
     try {
       const res = await fetch("/api/production", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey },
         body: JSON.stringify(form),
       }).then((r) => r.json());
 
@@ -104,9 +111,12 @@ export const ProductionView: React.FC<{ selectedProjectId: string | null }> = ({
         await fetchData();
         showToast("بچ تولید با موفقیت ثبت شد. مواد اولیه کسر و محصول نهایی به موجودی انبار اضافه گردید.", "success");
       } else {
+        setRequestKey(crypto.randomUUID());
+        if (res.code === "INSUFFICIENT_RAW_MATERIALS" && Array.isArray(res.shortages)) setShortages(res.shortages);
         setErrorMessage(parsePersianError(res.error || "خطا در ثبت بچ تولید"));
       }
     } catch (err: any) {
+      // Retain the key for a network retry whose outcome is unknown.
       setErrorMessage(parsePersianError(err.message || "خطا در ارتباط با سرور"));
     } finally {
       setSaving(false);
@@ -254,9 +264,9 @@ export const ProductionView: React.FC<{ selectedProjectId: string | null }> = ({
             </div>
 
             {errorMessage && (
-              <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300 flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                <span>{errorMessage}</span>
+              <div role="alert" className="max-h-64 overflow-auto rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300">
+                <div className="flex items-center gap-2 font-bold"><AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />{errorMessage}</div>
+                {shortages.length > 0 && <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[390px] text-right"><thead><tr><th className="p-1">ماده اولیه</th><th>موردنیاز</th><th>موجودی</th><th>کسری</th></tr></thead><tbody>{shortages.map((item) => <tr key={item.materialId} className="border-t border-rose-500/20"><td className="p-1">{item.materialName}{item.code ? ` (${item.code})` : ""}</td><td>{formatNumber(item.required)} {item.unit}</td><td>{formatNumber(item.available)} {item.unit}</td><td>{formatNumber(item.shortage)} {item.unit}</td></tr>)}</tbody></table></div>}
               </div>
             )}
 
@@ -265,7 +275,7 @@ export const ProductionView: React.FC<{ selectedProjectId: string | null }> = ({
                 <label className="block text-slate-400 mb-1">انتخاب محصول جهت تولید *</label>
                 <select
                   value={form.productId}
-                  onChange={(e) => setForm({ ...form, productId: e.target.value })}
+                  onChange={(e) => { setForm({ ...form, productId: e.target.value }); setRequestKey(crypto.randomUUID()); }}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white cursor-pointer"
                 >
                   {products.map((p) => (

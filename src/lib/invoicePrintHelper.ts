@@ -1,7 +1,7 @@
 import { toJalaliDate, formatMoney, formatRial, formatNumber } from "@/lib/dateUtils";
 import { numberToPersianWords } from "@/lib/numberToWords";
 
-export const INVOICE_DOCUMENT_WIDTH = 820;
+export const INVOICE_DOCUMENT_WIDTH = 500;
 export const INVOICE_JPG_SCALE = 2;
 export const INVOICE_JPG_OUTPUT_WIDTH = INVOICE_DOCUMENT_WIDTH * INVOICE_JPG_SCALE;
 
@@ -28,6 +28,7 @@ export interface SellerInfo {
 }
 
 export interface PrintableInvoiceData {
+  documentType?: "invoice" | "proforma";
   sellerInfo?: SellerInfo | null;
   invoice: {
     id: string;
@@ -41,6 +42,7 @@ export interface PrintableInvoiceData {
     projectName?: string | null;
     employeeName?: string | null;
     subtotal: number | string;
+    lineDiscountsTotal?: number | string;
     invoiceDiscount?: number | string;
     taxTotal?: number | string;
     grandTotal: number | string;
@@ -66,6 +68,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
   const { invoice, items, sellerInfo } = data;
   const grandTotalNum = Number(invoice.grandTotal) || 0;
   const subtotalNum = Number(invoice.subtotal) || 0;
+  const lineDiscountsNum = Number(invoice.lineDiscountsTotal) || items.reduce((sum, item) => sum + Number(item.discountAmount || 0), 0);
   const discountNum = Number(invoice.invoiceDiscount) || 0;
   const paidNum = Number(invoice.paidAmount) || 0;
   const balanceNum = Number(invoice.balanceDue) || 0;
@@ -96,17 +99,17 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
     .map(
       (item, idx) => `
     <tr data-invoice-item-row style="border-bottom: 1px solid #cbd5e1;">
-      <td style="padding: 7px 6px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${idx + 1}</td>
-      <td style="padding: 7px 8px; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a; text-align: right;">
+      <td style="padding: 5px 3px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${idx + 1}</td>
+      <td style="padding: 5px 4px; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a; text-align: right; overflow-wrap: anywhere;">
         ${escapeHtml(item.productNameSnapshot)}
         ${item.productCode ? `<span style="font-size: 10px; color: #475569; margin-right: 4px;">[${escapeHtml(item.productCode)}]</span>` : ""}
         ${item.customNotes ? `<div style="font-size: 10px; color: #64748b; margin-top: 2px; font-weight: normal;">${escapeHtml(item.customNotes)}</div>` : ""}
       </td>
-      <td style="padding: 7px 6px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${formatNumber(item.quantity)}</td>
-      <td style="padding: 7px 6px; text-align: center; border-left: 1px solid #cbd5e1; color: #0f172a;">${escapeHtml(item.productUnit || "عدد")}</td>
-      <td style="padding: 7px 8px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.unitPrice, "")}</td>
-      <td style="padding: 7px 8px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.discountAmount || 0, "")}</td>
-      <td style="padding: 7px 8px; text-align: left; font-weight: bold; color: #0f172a;">${formatMoney(item.lineTotal, "")}</td>
+      <td style="padding: 5px 3px; text-align: center; font-weight: bold; border-left: 1px solid #cbd5e1; color: #0f172a;">${formatNumber(item.quantity)}</td>
+      <td style="padding: 5px 3px; text-align: center; border-left: 1px solid #cbd5e1; color: #0f172a;">${escapeHtml(item.productUnit || "عدد")}</td>
+      <td style="padding: 5px 3px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.unitPrice, "")}</td>
+      <td style="padding: 5px 3px; text-align: left; border-left: 1px solid #cbd5e1; color: #0f172a; font-weight: bold;">${formatMoney(item.discountAmount || 0, "")}</td>
+      <td style="padding: 5px 3px; text-align: left; font-weight: bold; color: #0f172a;">${formatMoney(item.lineTotal, "")}</td>
     </tr>
   `
     )
@@ -117,12 +120,12 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8" />
-  <title>فاکتور فروش شماره ${escapeHtml(invoice.invoiceNumber || "رسمی")}</title>
+  <title>${data.documentType === "proforma" ? "پیش‌فاکتور — غیرقطعی" : "فاکتور فروش"} شماره ${escapeHtml(invoice.invoiceNumber || "رسمی")}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" />
   <style>
     @page {
-      size: A4 portrait;
-      margin: 8mm;
+      size: A5 portrait;
+      margin: 7mm;
     }
     * {
       box-sizing: border-box;
@@ -210,7 +213,8 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 11px;
+      table-layout: fixed;
+      font-size: 10px;
     }
     thead {
       background-color: #e2e8f0;
@@ -228,6 +232,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       grid-template-columns: 1fr 1fr;
       gap: 12px;
       margin-bottom: 16px;
+      break-inside: avoid;
     }
     .words-box {
       border: 1px solid #cbd5e1;
@@ -270,6 +275,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       padding-top: 16px;
       text-align: center;
       margin-top: 10px;
+      break-inside: avoid;
     }
     .sign-line {
       height: 45px;
@@ -288,8 +294,10 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
         print-color-adjust: exact !important;
       }
       .invoice-document {
-        border: 2px solid #000000;
+        width: 100%; min-width: 0; max-width: 100%;
+        border: 0; border-radius: 0; padding: 0;
       }
+      body { width: auto; min-width: 0; }
       .table-container {
         overflow: visible;
       }
@@ -310,10 +318,10 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
     <div class="header-box">
       <div>
         <div class="org-title">${sellerName}</div>
-        <div class="org-sub">صورتحساب فروش کالا و خدمات (فاکتور رسمی تجاری)</div>
+        <div class="org-sub">${data.documentType === "proforma" ? "پیش‌فاکتور — غیرقطعی، بدون اثر مالی و انباری" : "صورتحساب فروش کالا و خدمات (فاکتور رسمی تجاری)"}</div>
       </div>
       <div class="meta-box">
-        <div><span style="color: #475569;">شماره فاکتور: </span><strong style="color: #0f172a;">${escapeHtml(invoice.invoiceNumber || "—")}</strong></div>
+        <div><span style="color: #475569;">${data.documentType === "proforma" ? "شماره پیش‌فاکتور" : "شماره فاکتور"}: </span><strong style="color: #0f172a;">${escapeHtml(invoice.invoiceNumber || "—")}</strong></div>
         <div style="margin-top: 3px;"><span style="color: #475569;">تاریخ صدور: </span><strong style="color: #0f172a;">${toJalaliDate(invoice.invoiceDate)}</strong></div>${settlementLine}
       </div>
     </div>
@@ -335,6 +343,8 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       <div class="info-card">
         <div class="card-title">مشخصات خریدار</div>
         <div><span style="color: #475569;">خریدار / فروشگاه: </span><strong style="color: #0f172a;">${buyerName}</strong></div>
+        ${invoice.customerMobile ? `<div>تلفن: ${escapeHtml(invoice.customerMobile)}</div>` : ""}
+        ${invoice.customerAddress ? `<div>نشانی: ${escapeHtml(invoice.customerAddress)}</div>` : ""}
       </div>
     </div>
 
@@ -343,13 +353,13 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
       <table>
         <thead>
           <tr>
-            <th style="width: 40px; text-align: center; border-left: 1px solid #64748b;">ردیف</th>
+            <th style="width: 25px; text-align: center; border-left: 1px solid #64748b;">ردیف</th>
             <th style="border-left: 1px solid #64748b;">شرح کالا یا خدمات</th>
-            <th style="width: 55px; text-align: center; border-left: 1px solid #64748b;">تعداد</th>
-            <th style="width: 50px; text-align: center; border-left: 1px solid #64748b;">واحد</th>
-            <th style="width: 100px; text-align: left; border-left: 1px solid #64748b;">مبلغ واحد (تومان)</th>
-            <th style="width: 90px; text-align: left; border-left: 1px solid #64748b;">تخفیف (تومان)</th>
-            <th style="width: 110px; text-align: left;">مبلغ کل (تومان)</th>
+            <th style="width: 40px; text-align: center; border-left: 1px solid #64748b;">تعداد</th>
+            <th style="width: 34px; text-align: center; border-left: 1px solid #64748b;">واحد</th>
+            <th style="width: 72px; text-align: left; border-left: 1px solid #64748b;">مبلغ واحد</th>
+            <th style="width: 62px; text-align: left; border-left: 1px solid #64748b;">تخفیف</th>
+            <th style="width: 78px; text-align: left;">مبلغ کل (تومان)</th>
           </tr>
         </thead>
         <tbody>
@@ -373,6 +383,7 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
           <span style="color: #0f172a;">جمع اقلام فاکتور:</span>
           <strong style="color: #0f172a;">${formatMoney(subtotalNum)}</strong>
         </div>
+        ${lineDiscountsNum ? `<div class="calc-row"><span>تخفیف ردیف‌ها:</span><strong>${formatMoney(lineDiscountsNum)}</strong></div>` : ""}
         ${
           discountNum > 0
             ? `<div class="calc-row">
@@ -385,14 +396,14 @@ export function generateInvoiceHtml(data: PrintableInvoiceData): string {
           <span style="color: #0f172a; font-weight: 900;">مبلغ کل فاکتور:</span>
           <strong style="color: #0f172a; font-weight: 900;">${formatMoney(grandTotalNum)}</strong>
         </div>
-        <div class="calc-row" style="border-top: 1px solid #cbd5e1; padding-top: 4px; margin-top: 4px;">
+        ${data.documentType === "proforma" ? "" : `<div class="calc-row" style="border-top: 1px solid #cbd5e1; padding-top: 4px; margin-top: 4px;">
           <span style="color: #0f172a;">مبلغ پرداخت شده:</span>
           <strong style="color: #0f172a;">${formatMoney(paidNum)}</strong>
-        </div>
-        <div class="calc-row">
+        </div>`}
+        ${data.documentType === "proforma" ? "" : `<div class="calc-row">
           <span style="color: #0f172a; font-weight: bold;">مانده بدهی (طلب):</span>
           <strong style="color: #0f172a; font-weight: bold;">${formatMoney(balanceNum)}</strong>
-        </div>
+        </div>`}
       </div>
     </div>
 
@@ -448,6 +459,41 @@ export function triggerInvoicePrint(data: PrintableInvoiceData): void {
       }
     }, 2500);
   }, 400);
+}
+
+export async function downloadInvoicePdf(data: PrintableInvoiceData): Promise<void> {
+  const [{ default: html2canvas }, { default: JsPdf }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  const frame = document.createElement("iframe");
+  frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${INVOICE_DOCUMENT_WIDTH}px;height:1px;border:0`;
+  const loaded = new Promise<void>((resolve, reject) => { frame.onload = () => resolve(); frame.onerror = () => reject(new Error("بارگذاری فاکتور ناموفق بود.")); });
+  frame.srcdoc = generateInvoiceHtml(data);
+  document.body.appendChild(frame);
+  try {
+    await loaded;
+    await frame.contentDocument!.fonts?.ready;
+    const element = frame.contentDocument!.querySelector(".invoice-document") as HTMLElement;
+    const height = element.scrollHeight;
+    frame.style.height = `${height}px`;
+    const canvas = await html2canvas(element, { scale: 2, backgroundColor: "#fff", width: INVOICE_DOCUMENT_WIDTH, height, windowWidth: INVOICE_DOCUMENT_WIDTH, windowHeight: height });
+    const pdf = new JsPdf("p", "mm", "a5");
+    const pageWidth = 134, pageHeight = 196;
+    const maxPagePixels = Math.floor(canvas.width * pageHeight / pageWidth);
+    const scale = canvas.width / element.getBoundingClientRect().width;
+    const top = element.getBoundingClientRect().top;
+    const breaks = [...element.querySelectorAll("tr, .grid-2, .summary-grid, .signatures-grid")].flatMap((node) => [node.getBoundingClientRect().top, node.getBoundingClientRect().bottom]).map((y) => Math.round((y - top) * scale)).filter((y) => y > 0 && y < canvas.height).sort((a, b) => a - b);
+    let start = 0;
+    while (start < canvas.height) {
+      const limit = Math.min(start + maxPagePixels, canvas.height);
+      const candidates = breaks.filter((point) => point > start + maxPagePixels * .45 && point <= limit);
+      const end = limit === canvas.height ? limit : candidates.at(-1) ?? limit;
+      const slice = document.createElement("canvas"); slice.width = canvas.width; slice.height = end - start;
+      slice.getContext("2d")!.drawImage(canvas, 0, start, canvas.width, slice.height, 0, 0, canvas.width, slice.height);
+      if (start) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", .96), "JPEG", 7, 7, pageWidth, slice.height * pageWidth / canvas.width);
+      start = end;
+    }
+    pdf.save(`${data.documentType === "proforma" ? "Proforma" : "Invoice"}-${data.invoice.invoiceNumber}.pdf`);
+  } finally { frame.remove(); }
 }
 
 /**

@@ -248,6 +248,8 @@ export async function migrateDatabase() {
 
     CREATE TABLE IF NOT EXISTS production_batches (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      request_key TEXT UNIQUE,
+      request_hash TEXT,
       batch_number TEXT NOT NULL UNIQUE,
       product_id UUID NOT NULL REFERENCES products(id),
       project_id UUID REFERENCES projects(id),
@@ -396,6 +398,10 @@ export async function migrateDatabase() {
       employee_id UUID REFERENCES employees(id),
       status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','ready','converted','cancelled')),
       delivery_date TIMESTAMP,
+      valid_until TIMESTAMP,
+      delivery_address TEXT,
+      payment_terms TEXT,
+      invoice_discount NUMERIC(15,2) NOT NULL DEFAULT 0,
       notes TEXT,
       converted_invoice_id UUID UNIQUE REFERENCES invoices(id),
       created_by_id TEXT NOT NULL DEFAULT 'system_user',
@@ -406,13 +412,21 @@ export async function migrateDatabase() {
     CREATE TABLE IF NOT EXISTS order_items (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-      product_id UUID NOT NULL REFERENCES products(id),
+      product_id UUID REFERENCES products(id),
       product_name_snapshot TEXT NOT NULL,
       quantity NUMERIC(15,4) NOT NULL CHECK (quantity > 0),
       unit_price_snapshot NUMERIC(15,2) NOT NULL CHECK (unit_price_snapshot >= 0),
+      discount_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
       notes TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS valid_until TIMESTAMP;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_terms TEXT;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_discount NUMERIC(15,2) NOT NULL DEFAULT 0;
+    ALTER TABLE order_items ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(15,2) NOT NULL DEFAULT 0;
+    ALTER TABLE order_items ALTER COLUMN product_id DROP NOT NULL;
 
     CREATE TABLE IF NOT EXISTS payroll_records (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -727,6 +741,9 @@ export async function migrateDatabase() {
 
     ALTER TABLE production_batches
       ADD COLUMN IF NOT EXISTS total_material_cost NUMERIC(15,2) DEFAULT 0;
+    ALTER TABLE production_batches ADD COLUMN IF NOT EXISTS request_key TEXT;
+    ALTER TABLE production_batches ADD COLUMN IF NOT EXISTS request_hash TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_production_batches_request_key ON production_batches(request_key);
     ALTER TABLE production_batches
       ADD COLUMN IF NOT EXISTS production_date TIMESTAMP DEFAULT NOW();
     UPDATE production_batches

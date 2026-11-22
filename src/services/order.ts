@@ -13,9 +13,13 @@ export interface OrderInput {
   projectId?: string | null;
   employeeId?: string | null;
   deliveryDate?: Date | null;
+  validUntil?: Date | null;
+  deliveryAddress?: string | null;
+  paymentTerms?: string | null;
+  invoiceDiscount?: number;
   notes?: string | null;
   createdById?: string;
-  items: Array<{ productId: string; quantity: number; unitPrice?: number; notes?: string }>;
+  items: Array<{ productId?: string | null; productName?: string; quantity: number; unitPrice?: number; discountAmount?: number; notes?: string }>;
 }
 
 function validateInput(input: OrderInput) {
@@ -25,11 +29,15 @@ function validateInput(input: OrderInput) {
   if (!Array.isArray(input.items) || input.items.length === 0) throw new ApiError(400, "حداقل یک محصول برای سفارش الزامی است.");
   if (input.items.length > 500) throw new ApiError(400, "حداکثر ۵۰۰ ردیف در هر سفارش مجاز است.");
   for (const item of input.items) {
-    assertUuid(item.productId);
+    if (item.productId) assertUuid(item.productId);
+    else if (!item.productName?.trim()) throw new ApiError(400, "عنوان قلم دستی الزامی است.");
     const quantity = Number(decimal(item.quantity, "تعداد سفارش", 4, true));
     if (quantity <= 0) throw new ApiError(400, "تعداد سفارش باید بیشتر از صفر باشد.");
     if (item.unitPrice !== undefined && Number(decimal(item.unitPrice, "قیمت سفارش", 2)) < 0) throw new ApiError(400, "قیمت سفارش نامعتبر است.");
+    const discount = Number(decimal(item.discountAmount ?? 0, "تخفیف ردیف"));
+    if (item.unitPrice !== undefined && discount > quantity * Number(item.unitPrice)) throw new ApiError(400, "تخفیف ردیف از مبلغ آن بیشتر است.");
   }
+  decimal(input.invoiceDiscount ?? 0, "تخفیف کل");
 }
 
 export async function createOrder(input: OrderInput) {
@@ -45,11 +53,15 @@ export async function createOrder(input: OrderInput) {
     }
     const [customer] = await tx.select({ id: customers.id }).from(customers).where(eq(customers.id, input.customerId)).limit(1);
     if (!customer) throw new ApiError(404, "مشتری سفارش یافت نشد.");
-    const productIds = Array.from(new Set(input.items.map((item) => item.productId)));
-    const catalog = await tx.select().from(products).where(and(inArray(products.id, productIds), eq(products.status, "active"))).for("update");
+    const productIds = Array.from(new Set(input.items.map((item) => item.productId).filter((id): id is string => !!id)));
+    const catalog = productIds.length ? await tx.select().from(products).where(and(inArray(products.id, productIds), eq(products.status, "active"))).for("update") : [];
     if (catalog.length !== productIds.length) throw new ApiError(400, "یک یا چند محصول سفارش فعال یا معتبر نیست.");
     const productById = new Map(catalog.map((product) => [product.id, product]));
-    const ready = input.items.every((item) => Number(productById.get(item.productId)!.stockQuantity) >= Number(item.quantity));
+    const netTotal = input.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice ?? (item.productId ? productById.get(item.productId)?.basePrice : 0) ?? 0) - Number(item.discountAmount ?? 0), 0);
+    if (Number(input.invoiceDiscount ?? 0) > netTotal) throw new ApiError(400, "تخفیف کل از مبلغ سفارش بیشتر است.");
+    const requested = new Map<string, number>();
+    for (const item of input.items) if (item.productId) requested.set(item.productId, (requested.get(item.productId) || 0) + Number(item.quantity));
+    const ready = [...requested].every(([id, quantity]) => Number(productById.get(id)!.stockQuantity) >= quantity);
     const [order] = await tx.insert(orders).values({
       requestKey: input.requestKey,
       requestHash: input.requestHash,
@@ -59,22 +71,65 @@ export async function createOrder(input: OrderInput) {
       employeeId: input.employeeId || null,
       status: ready ? "ready" : "open",
       deliveryDate: input.deliveryDate || null,
+      validUntil: input.validUntil || null,
+      deliveryAddress: input.deliveryAddress?.trim() || null,
+      paymentTerms: input.paymentTerms?.trim() || null,
+      invoiceDiscount: String(input.invoiceDiscount ?? 0),
       notes: input.notes?.trim() || null,
       createdById: input.createdById || "system_user",
     }).returning();
     await tx.insert(orderItems).values(input.items.map((item) => {
-      const product = productById.get(item.productId)!;
+      const product = item.productId ? productById.get(item.productId) : null;
+      const price = Number(item.unitPrice ?? product?.basePrice ?? 0);
+      if (Number(item.discountAmount ?? 0) > Number(item.quantity) * price) throw new ApiError(400, "تخفیف ردیف از مبلغ آن بیشتر است.");
       return {
         orderId: order.id,
-        productId: product.id,
-        productNameSnapshot: product.name,
+        productId: product?.id || null,
+        productNameSnapshot: product?.name || item.productName!.trim(),
         quantity: Number(item.quantity).toString(),
-        unitPriceSnapshot: Number(item.unitPrice ?? product.basePrice).toString(),
+        unitPriceSnapshot: price.toString(),
+        discountAmount: String(item.discountAmount ?? 0),
         notes: item.notes?.trim() || null,
       };
     }));
     await logAuditEvent("ORDER_CREATE", "order", order.id, { orderNumber: order.orderNumber, customerId: order.customerId, itemCount: input.items.length }, undefined, tx);
     return order;
+  });
+}
+
+export async function updateOrder(orderId: string, input: OrderInput) {
+  assertUuid(orderId); validateInput(input);
+  return db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(orders).where(eq(orders.id, orderId)).for("update").limit(1);
+    if (!existing) throw new ApiError(404, "سفارش یافت نشد.");
+    if (existing.status === "converted" || existing.status === "cancelled") throw new ApiError(409, "سفارش قطعی یا لغوشده قابل ویرایش نیست.");
+    const [customer] = await tx.select({ id: customers.id }).from(customers).where(eq(customers.id, input.customerId)).limit(1);
+    if (!customer) throw new ApiError(404, "مشتری یافت نشد.");
+    const ids = [...new Set(input.items.map((item) => item.productId).filter((id): id is string => !!id))];
+    const catalog = ids.length ? await tx.select().from(products).where(and(inArray(products.id, ids), eq(products.status, "active"))).for("update") : [];
+    if (catalog.length !== ids.length) throw new ApiError(400, "یک یا چند محصول معتبر نیست.");
+    const byId = new Map(catalog.map((item) => [item.id, item]));
+    const netTotal = input.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice ?? (item.productId ? byId.get(item.productId)?.basePrice : 0) ?? 0) - Number(item.discountAmount ?? 0), 0);
+    if (Number(input.invoiceDiscount ?? 0) > netTotal) throw new ApiError(400, "تخفیف کل از مبلغ سفارش بیشتر است.");
+    const quantities = new Map<string, number>();
+    for (const item of input.items) if (item.productId) quantities.set(item.productId, (quantities.get(item.productId) || 0) + Number(item.quantity));
+    const ready = [...quantities].every(([id, count]) => Number(byId.get(id)!.stockQuantity) >= count);
+    const [updated] = await tx.update(orders).set({
+      customerId: input.customerId, status: ready ? "ready" : "open", deliveryDate: input.deliveryDate || null,
+      validUntil: input.validUntil || null, deliveryAddress: input.deliveryAddress?.trim() || null,
+      paymentTerms: input.paymentTerms?.trim() || null, invoiceDiscount: String(input.invoiceDiscount ?? 0),
+      notes: input.notes?.trim() || null, updatedAt: new Date(),
+    }).where(eq(orders.id, orderId)).returning();
+    await tx.delete(orderItems).where(eq(orderItems.orderId, orderId));
+    await tx.insert(orderItems).values(input.items.map((item) => {
+      const product = item.productId ? byId.get(item.productId) : null;
+      const price = Number(item.unitPrice ?? product?.basePrice ?? 0);
+      if (Number(item.discountAmount ?? 0) > Number(item.quantity) * price) throw new ApiError(400, "تخفیف ردیف از مبلغ آن بیشتر است.");
+      return { orderId, productId: product?.id || null, productNameSnapshot: product?.name || item.productName!.trim(),
+        quantity: String(item.quantity), unitPriceSnapshot: String(price), discountAmount: String(item.discountAmount ?? 0), notes: item.notes?.trim() || null };
+    }));
+    await logAuditEvent("ORDER_UPDATE", "order", orderId, { orderNumber: existing.orderNumber, before: { status: existing.status }, after: { status: updated.status } }, undefined, tx);
+    return updated;
   });
 }
 
@@ -114,8 +169,8 @@ export async function convertOrderToInvoice(orderId: string, actorId: string, dr
       salesMode: order.employeeId ? "visitor" : "direct",
       invoiceDate: draft?.invoiceDate || new Date(),
       dueDate: draft?.dueDate,
-      invoiceDiscount: draft?.invoiceDiscount || 0,
-      items: draft?.items?.length ? draft.items : items.map((item) => ({ productId: item.productId, quantity: Number(item.quantity), unitPrice: Number(item.unitPriceSnapshot), customNotes: item.notes || undefined })),
+      invoiceDiscount: draft?.invoiceDiscount ?? Number(order.invoiceDiscount),
+      items: draft?.items?.length ? draft.items : items.map((item) => ({ productId: item.productId, productName: item.productNameSnapshot, isCustom: !item.productId, quantity: Number(item.quantity), unitPrice: Number(item.unitPriceSnapshot), discountAmount: Number(item.discountAmount), customNotes: item.notes || undefined })),
       initialPayment: draft?.initialPayment,
       notes: draft?.notes || [order.notes, `تبدیل‌شده از سفارش ${order.orderNumber}`].filter(Boolean).join(" - "),
     };

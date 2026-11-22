@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrderInvoiceDraft, isActiveOrderStatus } from "../src/lib/orderWorkflow";
+import { buildOrderInvoiceDraft, buildOrderProforma, isActiveOrderStatus } from "../src/lib/orderWorkflow";
 import { CUSTOMER_FINANCIAL_DOCUMENT_WIDTH, generateCustomerFinancialHtml } from "../src/lib/customerFinancialPrintHelper";
 import { auditActionLabel } from "../src/lib/auditPresentation";
 
@@ -14,13 +14,19 @@ describe("Order to invoice workflow", () => {
   it("only considers open and ready orders active", () => {
     expect(["open", "ready", "converted", "cancelled"].filter(isActiveOrderStatus)).toEqual(["open", "ready"]);
   });
+
+  it("keeps manual charges and discounts in the non-posting proforma draft", () => {
+    const order = { id: "o", orderNumber: "ORD-1", customerId: "c", createdAt: "2026-11-19", invoiceDiscount: "10", items: [{ productId: null, productNameSnapshot: "هزینه ارسال", quantity: "2", unitPriceSnapshot: "50", discountAmount: "5" }] };
+    expect(buildOrderInvoiceDraft(order).items[0]).toMatchObject({ productName: "هزینه ارسال", isCustom: true, discountAmount: 5 });
+    expect(buildOrderProforma(order).invoice.grandTotal).toBe(85);
+  });
 });
 
 describe("Customer financial document", () => {
   it("uses a fixed official canvas and renders real financial sections", () => {
     const html = generateCustomerFinancialHtml({ customer: { code: "C-1", name: "مشتری" }, summary: { totalSales: 1000, totalPaid: 400, outstanding: 600, invoiceCount: 1 }, invoices: [{ invoiceNumber: "INV-1", invoiceDate: "2026-01-01", grandTotal: 1000, paidAmount: 400, balanceDue: 600 }], payments: [] });
-    expect(CUSTOMER_FINANCIAL_DOCUMENT_WIDTH).toBe(820);
-    expect(html).toContain("width:820px");
+    expect(CUSTOMER_FINANCIAL_DOCUMENT_WIDTH).toBe(500);
+    expect(html).toContain("width:500px");
     expect(html).toContain("INV-1");
     expect(html).toContain("بدهی‌های باز");
   });

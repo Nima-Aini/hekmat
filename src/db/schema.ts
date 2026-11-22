@@ -386,6 +386,8 @@ export const purchaseItems = pgTable("purchase_items", {
 
 // 9. Production Batches
 export const productionBatches = pgTable("production_batches", {
+  requestKey: text("request_key").unique(),
+  requestHash: text("request_hash"),
   id: uuid("id").defaultRandom().primaryKey(),
   batchNumber: text("batch_number").notNull().unique(),
   productId: uuid("product_id").notNull().references(() => products.id),
@@ -477,6 +479,10 @@ export const orders = pgTable("orders", {
   employeeId: uuid("employee_id").references(() => employees.id),
   status: text("status").default("open").notNull(), // open, ready, converted, cancelled
   deliveryDate: timestamp("delivery_date"),
+  validUntil: timestamp("valid_until"),
+  deliveryAddress: text("delivery_address"),
+  paymentTerms: text("payment_terms"),
+  invoiceDiscount: numeric("invoice_discount", { precision: 15, scale: 2 }).default("0").notNull(),
   notes: text("notes"),
   convertedInvoiceId: uuid("converted_invoice_id").unique().references(() => invoices.id),
   createdById: text("created_by_id").default("system_user").notNull(),
@@ -491,10 +497,11 @@ export const orders = pgTable("orders", {
 export const orderItems = pgTable("order_items", {
   id: uuid("id").defaultRandom().primaryKey(),
   orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
-  productId: uuid("product_id").notNull().references(() => products.id),
+  productId: uuid("product_id").references(() => products.id),
   productNameSnapshot: text("product_name_snapshot").notNull(),
   quantity: numeric("quantity", { precision: 15, scale: 4 }).notNull(),
   unitPriceSnapshot: numeric("unit_price_snapshot", { precision: 15, scale: 2 }).notNull(),
+  discountAmount: numeric("discount_amount", { precision: 15, scale: 2 }).default("0").notNull(),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_order_items_order").on(t.orderId)]);

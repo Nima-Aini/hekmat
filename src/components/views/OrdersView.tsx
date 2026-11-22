@@ -5,7 +5,8 @@ import { FilePlus2, Plus, RefreshCw, ShoppingCart, X } from "lucide-react";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { JalaliDatePicker } from "@/components/ui/JalaliDatePicker";
 import { formatMoney, toJalaliDate } from "@/lib/dateUtils";
-import { buildOrderInvoiceDraft, isActiveOrderStatus, type OrderInvoiceDraft } from "@/lib/orderWorkflow";
+import { buildOrderInvoiceDraft, buildOrderProforma, isActiveOrderStatus, type OrderInvoiceDraft } from "@/lib/orderWorkflow";
+import { downloadInvoicePdf, triggerInvoicePrint } from "@/lib/invoicePrintHelper";
 
 export function OrdersView({ selectedProjectId, permissions, onPrepareInvoice }: { selectedProjectId?: string | null; permissions?: Set<string> | string[]; onPrepareInvoice?: (draft: OrderInvoiceDraft) => void }) {
   const [orders, setOrders] = useState<any[]>([]);
@@ -15,10 +16,12 @@ export function OrdersView({ selectedProjectId, permissions, onPrepareInvoice }:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState("");
   const [page, setPage] = useState(1);
   const [focusOrderId, setFocusOrderId] = useState("");
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
-  const [form, setForm] = useState<any>({ customerId: "", deliveryDate: "", notes: "", items: [{ productId: "", quantity: 1, unitPrice: 0 }] });
+  const emptyForm = () => ({ customerId: "", deliveryDate: "", validUntil: "", deliveryAddress: "", paymentTerms: "", invoiceDiscount: 0, notes: "", items: [{ productId: "", productName: "", quantity: 1, unitPrice: 0, discountAmount: 0, notes: "" }] });
+  const [form, setForm] = useState<any>(emptyForm);
   const permissionSet = permissions instanceof Set ? permissions : new Set(permissions || ["*"]);
   const can = (code: string) => permissionSet.has("*") || permissionSet.has(code) || permissionSet.has("orders.manage");
 
@@ -53,16 +56,21 @@ export function OrdersView({ selectedProjectId, permissions, onPrepareInvoice }:
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ ...form, projectId: selectedProjectId || null }) });
+      const response = await fetch(editingId ? `/api/orders/${editingId}` : "/api/orders", { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ ...form, projectId: selectedProjectId || null }) });
       const data = await response.json();
       if (!data.success) throw new Error(data.error || "ثبت سفارش ناموفق بود.");
-      setShowCreate(false); setForm({ customerId: "", deliveryDate: "", notes: "", items: [{ productId: "", quantity: 1, unitPrice: 0 }] }); await load();
+      setShowCreate(false); setEditingId(""); setForm(emptyForm()); await load();
     } catch (cause: any) { setError(cause.message || "ثبت سفارش ناموفق بود."); }
     finally { setSaving(false); }
   };
   const convert = (order: any) => {
     if (!onPrepareInvoice) return alert("صفحه صدور فاکتور در دسترس نیست.");
     onPrepareInvoice(buildOrderInvoiceDraft(order));
+  };
+  const edit = (order: any) => {
+    setEditingId(order.id);
+    setForm({ customerId: order.customerId, deliveryDate: order.deliveryDate ? String(order.deliveryDate).slice(0, 10) : "", validUntil: order.validUntil ? String(order.validUntil).slice(0, 10) : "", deliveryAddress: order.deliveryAddress || "", paymentTerms: order.paymentTerms || "", invoiceDiscount: Number(order.invoiceDiscount || 0), notes: order.notes || "", items: order.items.map((item: any) => ({ productId: item.productId || "", productName: item.productId ? "" : item.productNameSnapshot, quantity: Number(item.quantity), unitPrice: Number(item.unitPriceSnapshot), discountAmount: Number(item.discountAmount || 0), notes: item.notes || "" })) });
+    setShowCreate(true);
   };
   const cancel = async (id: string) => {
     if (!confirm("این سفارش لغو شود؟ اطلاعات سفارش و تاریخچه آن حذف نخواهد شد.")) return;
@@ -71,12 +79,12 @@ export function OrdersView({ selectedProjectId, permissions, onPrepareInvoice }:
     await load();
   };
   const statusLabel = (status: string) => ({ open: "باز", ready: "آماده", converted: "تبدیل‌شده", cancelled: "لغوشده" })[status] || status;
-  const orderActions = (order: any) => <>{isActiveOrderStatus(order.status) && can("orders.convert") && <button onClick={() => convert(order)} className="min-w-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">تبدیل به فاکتور</button>}{isActiveOrderStatus(order.status) && can("orders.cancel") && <button onClick={() => cancel(order.id)} className="min-w-0 rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-bold text-rose-300">لغو</button>}</>;
+  const orderActions = (order: any) => <>{isActiveOrderStatus(order.status) && <><button onClick={() => triggerInvoicePrint(buildOrderProforma(order))} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-xs text-cyan-300">چاپ پیش‌فاکتور A5</button><button onClick={() => void downloadInvoicePdf(buildOrderProforma(order)).catch(() => setError("ساخت PDF پیش‌فاکتور ناموفق بود."))} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-xs text-cyan-300">PDF پیش‌فاکتور</button></>}{isActiveOrderStatus(order.status) && can("orders.create") && <button onClick={() => edit(order)} className="rounded-lg border border-slate-600 px-3 py-2 text-xs">ویرایش</button>}{isActiveOrderStatus(order.status) && can("orders.convert") && <button onClick={() => convert(order)} className="min-w-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">تبدیل به فاکتور</button>}{isActiveOrderStatus(order.status) && can("orders.cancel") && <button onClick={() => cancel(order.id)} className="min-w-0 rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-bold text-rose-300">لغو</button>}</>;
 
   return <div className="space-y-5">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div><h2 className="text-xl font-black text-white">سفارشات</h2><p className="text-xs text-slate-400">سفارش تا زمان تبدیل به فاکتور هیچ اثر مالی یا انباری ندارد.</p></div>
-      {can("orders.create") && <button onClick={() => setShowCreate(true)} className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold text-white"><Plus className="h-4 w-4" />سفارش جدید</button>}
+      {can("orders.create") && <button onClick={() => { setEditingId(""); setForm(emptyForm()); setShowCreate(true); }} className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold text-white"><Plus className="h-4 w-4" />سفارش جدید</button>}
     </div>
     {focusOrderId && <button onClick={() => setFocusOrderId("")} className="text-xs text-cyan-300">نمایش همه سفارش‌ها</button>}
     {error && <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-300">{error}</div>}
@@ -88,11 +96,23 @@ export function OrdersView({ selectedProjectId, permissions, onPrepareInvoice }:
     </div>
     {pagination.totalPages > 1 && <div className="flex justify-center gap-2"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border border-slate-700 px-3 py-2 disabled:opacity-40">قبلی</button><span className="p-2 text-xs text-slate-400">صفحه {page.toLocaleString("fa-IR")} از {pagination.totalPages.toLocaleString("fa-IR")}</span><button disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} className="rounded-lg border border-slate-700 px-3 py-2 disabled:opacity-40">بعدی</button></div>}
     {showCreate && <div role="dialog" aria-modal="true" className="app-modal fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[90dvh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-3xl border border-slate-800 bg-slate-950 p-4 sm:p-5">
-      <div className="flex items-center justify-between"><h3 className="flex items-center gap-2 font-bold"><ShoppingCart className="h-5 w-5 text-purple-400" />ثبت سفارش بدون اثر حسابداری</h3><button type="button" onClick={() => setShowCreate(false)} aria-label="بستن"><X className="h-5 w-5" /></button></div>
+      <div className="flex items-center justify-between"><h3 className="flex items-center gap-2 font-bold"><ShoppingCart className="h-5 w-5 text-purple-400" />{editingId ? "ویرایش سفارش" : "ثبت سفارش بدون اثر حسابداری"}</h3><button type="button" onClick={() => setShowCreate(false)} aria-label="بستن"><X className="h-5 w-5" /></button></div>
       <select required value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-900 p-3"><option value="">انتخاب مشتری / فروشگاه</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.storeName || customer.name}</option>)}</select>
-      {form.items.map((item: any, index: number) => <div key={index} className="grid gap-2 rounded-xl border border-slate-800 p-3 sm:grid-cols-[1fr_120px_190px_auto]"><select required value={item.productId} onChange={(e) => { const product = products.find((p) => p.id === e.target.value); updateItem(index, { productId: e.target.value, unitPrice: Number(product?.basePrice || 0) }); }} className="rounded-lg bg-slate-900 p-2"><option value="">انتخاب محصول</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} — موجودی {product.stockQuantity}</option>)}</select><input type="number" min="0.0001" step="0.0001" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })} className="rounded-lg bg-slate-900 p-2" /><MoneyInput value={item.unitPrice} onChange={(unitPrice) => updateItem(index, { unitPrice })} unit="تومان" /><button type="button" disabled={form.items.length === 1} onClick={() => setForm({ ...form, items: form.items.filter((_: any, itemIndex: number) => itemIndex !== index) })} className="text-rose-400 disabled:opacity-30"><X className="h-4 w-4" /></button></div>)}
-      <button type="button" onClick={() => setForm({ ...form, items: [...form.items, { productId: "", quantity: 1, unitPrice: 0 }] })} className="text-xs text-purple-300">+ افزودن محصول</button>
-      <div className="grid gap-3 sm:grid-cols-2"><JalaliDatePicker value={form.deliveryDate || null} onChange={(date) => setForm({ ...form, deliveryDate: date ? date.toISOString().slice(0, 10) : "" })} label="تاریخ تحویل (اختیاری)" /><div><label className="mb-1 block text-xs text-slate-400">جمع برآوردی</label><div className="rounded-xl bg-slate-900 p-3 font-bold text-emerald-300">{formatMoney(form.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0), 0))}</div></div></div>
+      {form.items.map((item: any, index: number) => <div key={index} className="grid gap-2 rounded-xl border border-slate-800 p-3 sm:grid-cols-2">
+        <select value={item.productId || ""} onChange={(e) => { const product = products.find((p) => p.id === e.target.value); updateItem(index, { productId: e.target.value, productName: "", unitPrice: Number(product?.basePrice || 0) }); }} className="rounded-lg bg-slate-900 p-2"><option value="">قلم دستی / هزینه جانبی</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} — موجودی {product.stockQuantity}</option>)}</select>
+        {!item.productId && <input required value={item.productName || ""} onChange={(e) => updateItem(index, { productName: e.target.value })} placeholder="عنوان قلم دستی، مثلاً هزینه ارسال" className="rounded-lg bg-slate-900 p-2" />}
+        <label className="text-xs text-slate-400">تعداد<input type="number" min="0.0001" step="0.0001" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })} className="block w-full rounded-lg bg-slate-900 p-2" /></label>
+        <div><label className="text-xs text-slate-400">قیمت واحد</label><MoneyInput value={item.unitPrice} onChange={(unitPrice) => updateItem(index, { unitPrice })} unit="تومان" /></div>
+        <div><label className="text-xs text-slate-400">تخفیف ردیف</label><MoneyInput value={item.discountAmount || 0} onChange={(discountAmount) => updateItem(index, { discountAmount })} unit="تومان" /></div>
+        <input value={item.notes || ""} onChange={(e) => updateItem(index, { notes: e.target.value })} placeholder="توضیحات ردیف" className="rounded-lg bg-slate-900 p-2" />
+        <button type="button" disabled={form.items.length === 1} onClick={() => setForm({ ...form, items: form.items.filter((_: any, itemIndex: number) => itemIndex !== index) })} className="text-right text-rose-400 disabled:opacity-30">حذف ردیف</button>
+      </div>)}
+      <button type="button" onClick={() => setForm({ ...form, items: [...form.items, { productId: "", productName: "", quantity: 1, unitPrice: 0, discountAmount: 0, notes: "" }] })} className="text-xs text-purple-300">+ افزودن محصول یا هزینه جانبی</button>
+      <div className="grid gap-3 sm:grid-cols-2"><JalaliDatePicker value={form.deliveryDate || null} onChange={(date) => setForm({ ...form, deliveryDate: date ? date.toISOString().slice(0, 10) : "" })} label="تاریخ تحویل (اختیاری)" /><JalaliDatePicker value={form.validUntil || null} onChange={(date) => setForm({ ...form, validUntil: date ? date.toISOString().slice(0, 10) : "" })} label="اعتبار پیش‌فاکتور (اختیاری)" /></div>
+      <input value={form.deliveryAddress} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} placeholder="آدرس تحویل (اختیاری)" className="w-full rounded-xl bg-slate-900 p-3" />
+      <input value={form.paymentTerms} onChange={(e) => setForm({ ...form, paymentTerms: e.target.value })} placeholder="شرایط پرداخت (اختیاری)" className="w-full rounded-xl bg-slate-900 p-3" />
+      <div><label className="mb-1 block text-xs text-slate-400">تخفیف کل سفارش</label><MoneyInput value={form.invoiceDiscount} onChange={(invoiceDiscount) => setForm({ ...form, invoiceDiscount })} unit="تومان" /></div>
+      <div className="rounded-xl bg-slate-900 p-3 text-xs font-bold text-emerald-300">جمع برآوردی: {formatMoney(form.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0) - Number(item.discountAmount || 0), 0) - Number(form.invoiceDiscount || 0))}</div>
       <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="توضیحات سفارش" className="w-full rounded-xl bg-slate-900 p-3" />
       <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowCreate(false)} className="rounded-xl border border-slate-700 px-4 py-2">انصراف</button><button disabled={saving} className="flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2 font-bold"><FilePlus2 className="h-4 w-4" />{saving ? "در حال ثبت…" : "ثبت سفارش"}</button></div>
     </form></div>}
