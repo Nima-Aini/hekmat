@@ -34,6 +34,24 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/hekmat_test
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/hekmat_test
+      - name: Render A5 print samples in Chrome
+        env:
+          PRINT_SAMPLE_DIR: ${{ runner.temp }}/print-samples
+        run: |
+          mkdir -p "$PRINT_SAMPLE_DIR"
+          npm run test:print
+          google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/proforma-long.pdf" "file://$PRINT_SAMPLE_DIR/proforma-long.html"
+          google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/invoice-short.pdf" "file://$PRINT_SAMPLE_DIR/invoice-short.html"
+          google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer --print-to-pdf="$PRINT_SAMPLE_DIR/customer-financial.pdf" "file://$PRINT_SAMPLE_DIR/customer-financial.html"
+          for pdf in "$PRINT_SAMPLE_DIR"/*.pdf; do
+            pdfinfo "$pdf" | grep -q 'Page size: *419.* x 595.* pts (A5)'
+          done
+          test "$(pdfinfo "$PRINT_SAMPLE_DIR/proforma-long.pdf" | awk '/Pages:/ {print $2}')" -gt 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: a5-print-samples
+          path: ${{ runner.temp }}/print-samples/*.pdf
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
